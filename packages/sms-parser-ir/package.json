@@ -1,0 +1,27 @@
+{
+  "name": "@jibban/sms-parser-ir",
+  "version": "0.1.0",
+  "description": "استخراج‌گر و پردازشگر هوشمند پیامک‌های بانکی ایران برای ۲۶+ بانک با موتور فال‌بک معنایی",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "persian",
+    "bank",
+    "sms",
+    "parser",
+    "iran",
+    "rial",
+    "toman",
+    "jibban"
+  ],
+  "author": "JibBan Contributors",
+  "license": "MIT"
+}
