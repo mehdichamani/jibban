@@ -5,7 +5,7 @@ import { getSyncToken, setSyncToken } from '../lib/api.js';
 export const SettingsTab: React.FC = () => {
   const [token, setToken] = useState<string>(getSyncToken());
   const [copied, setCopied] = useState<boolean>(false);
-  const [serverUrl, setServerUrl] = useState<string>('http://localhost:8787');
+  const [serverUrl, setServerUrl] = useState<string>('https://jibban-api.ajbv.ir');
   const [resetDone, setResetDone] = useState<boolean>(false);
 
   const handleCopy = () => {
@@ -112,11 +112,11 @@ export const SettingsTab: React.FC = () => {
           type="text"
           value={serverUrl}
           onChange={(e) => setServerUrl(e.target.value)}
-          placeholder="https://your-worker.workers.dev"
+          placeholder="https://jibban-api.ajbv.ir"
           className="input-field text-xs sm:text-sm font-mono"
         />
         <div className="text-[11px] text-slate-500">
-          در حالت لوکال آدرس <code>http://localhost:8787</code> پیش‌فرض استفاده می‌شود.
+          در حالت لوکال آدرس <code>http://localhost:8787</code> و در حالت ابری <code>https://jibban-api.ajbv.ir</code> استفاده می‌شود.
         </div>
       </div>
 

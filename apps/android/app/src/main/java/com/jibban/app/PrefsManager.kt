@@ -38,7 +38,7 @@ class PrefsManager(context: Context) {
         const val DEFAULT_SYNC_TOKEN = "jibban_sync_demo_token_12345"
 
         // آدرس‌های سرور ابری کلادفلر و وب‌اپلیکیشن
-        const val DEFAULT_SERVER_URL = "https://jibban-worker.mahdi-chamani20.workers.dev"
-        const val DEFAULT_WEB_APP_URL = "https://jibban-web.pages.dev"
+        const val DEFAULT_SERVER_URL = "https://jibban-api.ajbv.ir"
+        const val DEFAULT_WEB_APP_URL = "https://jibban.ajbv.ir"
     }
 }

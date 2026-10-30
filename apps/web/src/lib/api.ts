@@ -2,7 +2,7 @@ import { Transaction, Group, GroupSummaryData, Category } from '../types.js';
 import { parseBankSms } from '@jibban/sms-parser-ir';
 import { calculateGroupSummary, calculateEqualSplits } from '@jibban/debt-engine';
 
-const CLOUD_API_BASE = 'https://jibban-worker.mahdi-chamani20.workers.dev/api';
+const CLOUD_API_BASE = 'https://jibban-api.ajbv.ir/api';
 const API_BASE =
   typeof window !== 'undefined' &&
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')

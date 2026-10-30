@@ -6,6 +6,9 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "routes": [
+    { "pattern": "jibban-api.ajbv.ir", "custom_domain": true }
+  ],
   "d1_databases": [
     {
       "binding": "DB",
