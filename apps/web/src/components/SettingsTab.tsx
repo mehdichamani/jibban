@@ -47,7 +47,7 @@ export const SettingsTab: React.FC = () => {
     setScanResult(null);
 
     try {
-      const rawJson = bridge.scanInboxSms(100);
+      const rawJson = bridge.scanInboxSms(300);
       const parsed = JSON.parse(rawJson);
 
       if (!parsed.success) {
@@ -63,17 +63,22 @@ export const SettingsTab: React.FC = () => {
 
       const messages = parsed.messages || [];
       let importedCount = 0;
+      let duplicateOrSkippedCount = 0;
 
       for (const msg of messages) {
-        const res = await api.ingestSms(msg.body);
+        const res = await api.ingestSms(msg.body, msg.sender, msg.timestamp);
         if (res.success) {
-          importedCount++;
+          if (res.alreadyProcessed) {
+            duplicateOrSkippedCount++;
+          } else {
+            importedCount++;
+          }
         }
       }
 
       setScanResult({
         success: true,
-        message: `اسکن با موفقیت پایان یافت: از ${parsed.scannedCount} پیامک اخیر، ${parsed.bankFoundCount} پیامک بانکی شناسایی شد و ${importedCount} تراکنش به حساب شما افزوده شد.`,
+        message: `اسکن با موفقیت پایان یافت: از ${parsed.scannedCount} پیامک بررسی‌شده، ${parsed.bankFoundCount} پیامک بانکی شناسایی شد (${importedCount} تراکنش جدید افزوده شد، ${duplicateOrSkippedCount} پیامک تکراری یا قبلاً حذف‌شده بدون ثبت مجدد نادیده گرفته شد).`,
       });
 
       setTimeout(() => {

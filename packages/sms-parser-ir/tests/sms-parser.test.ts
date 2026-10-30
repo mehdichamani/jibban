@@ -89,6 +89,34 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.accountNumber).toBe('1234');
     });
 
+    it('پردازش پیامک انتقال وجه بانک ملی با تاریخ فشرده و علامت مثبت/منفی', () => {
+      const smsCredit = `بانك ملي ايران
+انتقال:10,000,000+
+حساب:92008
+مانده:36,261,500
+0804-20:24`;
+      const resultCredit = parseBankSms(smsCredit);
+      expect(resultCredit.isBankSms).toBe(true);
+      expect(resultCredit.bankName).toBe('ملی');
+      expect(resultCredit.type).toBe('credit');
+      expect(resultCredit.amount).toBe(1000000); // 10,000,000 ریال = 1,000,000 تومان
+      expect(resultCredit.balance).toBe(3626150);
+      expect(resultCredit.accountNumber).toBe('2008');
+      expect(resultCredit.transactionDate).toBeDefined();
+
+      const smsDebit = `بانك ملي ايران
+انتقال:20,014,500-
+حساب:92008
+مانده:27,661,500
+0804-12:47`;
+      const resultDebit = parseBankSms(smsDebit);
+      expect(resultDebit.isBankSms).toBe(true);
+      expect(resultDebit.bankName).toBe('ملی');
+      expect(resultDebit.type).toBe('debit');
+      expect(resultDebit.amount).toBe(2001450);
+      expect(resultDebit.balance).toBe(2766150);
+    });
+
     // ۳. بانک ملت
     it('پردازش پیامک واریز بانک ملت', () => {
       const sms = `بانک ملت
@@ -512,6 +540,24 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(parseBankSms('').isBankSms).toBe(false);
       // @ts-expect-error تست ورودی نامعتبر
       expect(parseBankSms(null).isBankSms).toBe(false);
+    });
+
+    it('رد کردن قبوض و صورت‌حساب‌های اپراتورها و کلمه سامانه', () => {
+      const mciBill = `مشترک گرامی شماره 9146136921
+صورت‌حساب مهر 1405 
+بدهی پیشین: 645 ريال
+قابل پرداخت: 488000 ریال
+مهلت پرداخت: 1405/8/15 
+همراه اول`;
+      expect(parseBankSms(mciBill).isBankSms).toBe(false);
+
+      const mciDetails = `مشترک گرامی شماره: 9146136921 جزئيات صورت‌حساب مهر 1405 مکالمه: 91710  پيامک: 23 سامانه 9990`;
+      expect(parseBankSms(mciDetails).isBankSms).toBe(false);
+
+      const mciReceipt = `مشترک گرامی
+ضمن تشکر، پرداخت شما به مبلغ 488000 ریال دریافت شد.
+مشاهده جزئیات صورتحساب و دسترسی به تمامی خدمات همراه اول در اپلیکیشن همراه من`;
+      expect(parseBankSms(mciReceipt).isBankSms).toBe(false);
     });
   });
 });

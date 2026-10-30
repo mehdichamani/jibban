@@ -202,8 +202,8 @@ export function identifyBank(text: string): BankRule | undefined {
   for (const bank of sortedBanks) {
     for (const alias of bank.aliases) {
       const lowerAlias = alias.toLowerCase();
-      if (lowerAlias.length <= 4) {
-        // بررسی کلمه مستقل برای اسامی کوتاه (مانند بلو، دی، شهر، سپه)
+      if (!lowerAlias.includes(' ')) {
+        // برای اسامی تک کلمه‌ای، بررسی کلمه مستقل الزامی است تا مثلاً «سامانه» با «سامان» یا «مملکت» با «ملت» اشتباه نشود
         const escaped = lowerAlias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const wordRegex = new RegExp(`(?:^|[^a-zA-Z0-9آ-ی])${escaped}(?:$|[^a-zA-Z0-9آ-ی])`, 'i');
         if (wordRegex.test(lowerText)) {

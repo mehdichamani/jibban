@@ -63,7 +63,27 @@ export function extractTransactionDate(text: string): string | undefined {
 
   // ۱. الگوهای تاریخ شمسی: 1403/08/09 یا 03/08/09 با جداکننده‌های / یا - یا .
   const dateMatch = text.match(/\b(13\d{2}|14\d{2}|0\d|\d{2})[/.-](\d{1,2})[/.-](\d{1,2})\b/);
-  if (!dateMatch) return undefined;
+  if (!dateMatch) {
+    // ۲. الگوی فشرده ماه و روز (مانند بانک ملی: 0804-20:24)
+    const compactMatch = text.match(/\b(0[1-9]|1[0-2])([0-2][0-9]|3[01])-(\d{1,2}):(\d{2})(?::(\d{2}))?\b/);
+    if (compactMatch) {
+      const month = parseInt(compactMatch[1], 10);
+      const day = parseInt(compactMatch[2], 10);
+      const hour = parseInt(compactMatch[3], 10);
+      const minute = parseInt(compactMatch[4], 10);
+      const second = compactMatch[5] ? parseInt(compactMatch[5], 10) : 0;
+      const currentYear = new Date().getFullYear();
+      const jalaliYear = currentYear >= 2026 ? 1405 : (currentYear >= 2025 ? 1404 : 1403);
+      try {
+        const [gy, gm, gd] = jalaliToGregorian(jalaliYear, month, day);
+        const pad = (n: number) => String(n).padStart(2, '0');
+        return `${gy}-${pad(gm)}-${pad(gd)}T${pad(hour)}:${pad(minute)}:${pad(second)}+03:30`;
+      } catch {
+        return undefined;
+      }
+    }
+    return undefined;
+  }
 
   let year = parseInt(dateMatch[1], 10);
   const month = parseInt(dateMatch[2], 10);

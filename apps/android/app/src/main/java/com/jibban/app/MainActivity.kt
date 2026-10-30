@@ -213,7 +213,8 @@ class MainActivity : AppCompatActivity() {
          */
         @JavascriptInterface
         fun scanInboxSms(limit: Int): String {
-            val maxLimit = if (limit in 1..300) limit else 50
+            val maxBankLimit = if (limit in 1..500) limit else 200
+            val maxScanTotal = 1500
             val result = JSONObject()
 
             if (ContextCompat.checkSelfPermission(
@@ -246,7 +247,7 @@ class MainActivity : AppCompatActivity() {
                     val addressIndex = it.getColumnIndex("address")
                     val dateIndex = it.getColumnIndex("date")
 
-                    while (it.moveToNext() && scannedCount < maxLimit) {
+                    while (it.moveToNext() && scannedCount < maxScanTotal && bankList.length() < maxBankLimit) {
                         scannedCount++
                         val body = if (bodyIndex != -1) it.getString(bodyIndex) ?: "" else ""
                         val address = if (addressIndex != -1) it.getString(addressIndex) ?: "" else ""

@@ -18,7 +18,23 @@ CREATE TABLE IF NOT EXISTS categories (
     is_income BOOLEAN DEFAULT 0
 );
 
--- ۳. تراکنش‌های بانکی و دستی
+-- ۳. پیامک‌های خام دریافتی با شناسه هش یکتا (Raw SMS Archive & Deduplication)
+CREATE TABLE IF NOT EXISTS raw_sms (
+    id TEXT PRIMARY KEY, -- برابر با sms_hash
+    sms_hash TEXT UNIQUE NOT NULL,
+    user_id TEXT NOT NULL,
+    sender TEXT,
+    raw_text TEXT NOT NULL,
+    status TEXT CHECK(status IN ('processed', 'ignored', 'deleted', 'manual')) DEFAULT 'processed',
+    transaction_id TEXT, -- لینک به تراکنش متناظر در صورت وجود
+    received_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_raw_sms_hash ON raw_sms(sms_hash);
+CREATE INDEX IF NOT EXISTS idx_raw_sms_user ON raw_sms(user_id);
+
+-- ۴. تراکنش‌های بانکی و دستی
 CREATE TABLE IF NOT EXISTS transactions (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -30,11 +46,13 @@ CREATE TABLE IF NOT EXISTS transactions (
     category_id TEXT,
     description TEXT,
     raw_sms TEXT,
+    sms_hash TEXT, -- لینک به شناسه یکتای پیامک خام
     transaction_date DATETIME NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES users(id),
     FOREIGN KEY(category_id) REFERENCES categories(id)
 );
+CREATE INDEX IF NOT EXISTS idx_transactions_sms_hash ON transactions(sms_hash);
 
 -- ۴. گروه‌های دنگ
 CREATE TABLE IF NOT EXISTS groups (

@@ -139,6 +139,12 @@ class SmsListenerReceiver : BroadcastReceiver() {
                 return false
             }
 
+            // قبوض و پیام‌های اپراتوری رد می‌شوند
+            if ((text.contains("همراه اول") || text.contains("ایرانسل") || text.contains("مخابرات")) &&
+                (text.contains("صورت‌حساب") || text.contains("صورتحساب") || text.contains("بدهی پیشین") || text.contains("بسته اینترنت"))) {
+                return false
+            }
+
             val hasAction = text.contains("برداشت") || text.contains("واریز") ||
                     text.contains("خرید") || text.contains("انتقال") || text.contains("پرداخت")
 

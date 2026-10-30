@@ -137,9 +137,13 @@ export const api = {
   },
 
   /**
-   * پردازش و ثبت پیامک بانکی
+   * پردازش و ثبت پیامک بانکی همراه با جلوگیری از ثبت تکراری
    */
-  async ingestSms(rawSms: string): Promise<{ success: boolean; isBankSms: boolean; transaction?: Transaction; message?: string }> {
+  async ingestSms(
+    rawSms: string,
+    sender?: string,
+    timestamp?: number
+  ): Promise<{ success: boolean; isBankSms?: boolean; alreadyProcessed?: boolean; transaction?: Transaction; message?: string }> {
     try {
       const token = getSyncToken();
       const res = await fetch(`${API_BASE}/sms/ingest`, {
@@ -148,14 +152,17 @@ export const api = {
           'Content-Type': 'application/json',
           'X-Sync-Token': token,
         },
-        body: JSON.stringify({ rawSms, syncToken: token }),
+        body: JSON.stringify({ rawSms, syncToken: token, sender, timestamp }),
       });
       if (res.ok) {
         const json = await res.json();
         if (json.transaction) {
           const list = getLocalTransactions();
-          list.unshift(json.transaction);
-          saveLocalTransactions(list);
+          const exists = list.some((t) => t.id === json.transaction.id || (t.rawSms && t.rawSms === json.transaction.rawSms));
+          if (!exists) {
+            list.unshift(json.transaction);
+            saveLocalTransactions(list);
+          }
         }
         return json;
       }

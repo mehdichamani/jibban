@@ -19,6 +19,7 @@ transactionsRouter.get('/', async (c) => {
       t.id, t.user_id as userId, t.bank_name as bankName,
       t.account_number as accountNumber, t.amount, t.type,
       t.balance, t.category_id as categoryId, t.description,
+      t.raw_sms as rawSms, t.sms_hash as smsHash,
       t.transaction_date as transactionDate, t.created_at as createdAt,
       c.name as categoryName, c.icon as categoryIcon, c.color as categoryColor
     FROM transactions t
@@ -124,14 +125,18 @@ transactionsRouter.get('/:id', async (c) => {
 });
 
 /**
- * ویرایش دسته‌بندی و یادداشت شخصی یک تراکنش
+ * ویرایش اطلاعات یک تراکنش (دسته‌بندی، یادداشت، مبلغ، تاریخ و...)
  */
 transactionsRouter.patch('/:id', async (c) => {
   const id = c.req.param('id');
+  const userId = c.get('userId');
   const body = await c.req.json<{
     categoryId?: string;
     description?: string;
     amount?: number;
+    type?: 'debit' | 'credit';
+    bankName?: string;
+    transactionDate?: string;
   }>();
 
   const updates: string[] = [];
@@ -149,16 +154,76 @@ transactionsRouter.patch('/:id', async (c) => {
     updates.push('amount = ?');
     params.push(body.amount);
   }
+  if (body.type !== undefined && (body.type === 'debit' || body.type === 'credit')) {
+    updates.push('type = ?');
+    params.push(body.type);
+  }
+  if (body.bankName !== undefined) {
+    updates.push('bank_name = ?');
+    params.push(body.bankName);
+  }
+  if (body.transactionDate !== undefined) {
+    updates.push('transaction_date = ?');
+    params.push(body.transactionDate);
+  }
 
   if (updates.length === 0) {
     return c.json({ success: false, error: 'هیچ فیلدی برای تغییر ارسال نشده است' }, 400);
   }
 
-  params.push(id);
-  const query = `UPDATE transactions SET ${updates.join(', ')} WHERE id = ?`;
-  await c.env.DB.prepare(query).bind(...params).run();
+  params.push(id, userId);
+  const query = `UPDATE transactions SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`;
+  const result = await c.env.DB.prepare(query).bind(...params).run();
+
+  if (result.meta?.changes === 0) {
+    return c.json({ success: false, error: 'تراکنش پیدا نشد یا دسترسی غیرمجاز است' }, 404);
+  }
 
   return c.json({ success: true, message: 'تراکنش با موفقیت بروزرسانی شد' });
+});
+
+/**
+ * حذف یک تراکنش و علامت‌گذاری پیامک خام متناظر با 'deleted'
+ * تا در صورت اسکن مجدد موبایل، دوباره در دیتابیس ثبت نشود
+ */
+transactionsRouter.delete('/:id', async (c) => {
+  const id = c.req.param('id');
+  const userId = c.get('userId');
+
+  const tx = await c.env.DB.prepare(
+    'SELECT id, sms_hash FROM transactions WHERE id = ? AND user_id = ?'
+  )
+    .bind(id, userId)
+    .first<{ id: string; sms_hash: string | null }>();
+
+  if (!tx) {
+    return c.json({ success: false, error: 'تراکنش پیدا نشد' }, 404);
+  }
+
+  // ۱. بروزرسانی سابقه در raw_sms برای ماندگاری حذف
+  if (tx.sms_hash) {
+    await c.env.DB.prepare(
+      "UPDATE raw_sms SET status = 'deleted', transaction_id = NULL WHERE sms_hash = ? AND user_id = ?"
+    )
+      .bind(tx.sms_hash, userId)
+      .run();
+  } else {
+    await c.env.DB.prepare(
+      "UPDATE raw_sms SET status = 'deleted', transaction_id = NULL WHERE transaction_id = ? AND user_id = ?"
+    )
+      .bind(id, userId)
+      .run();
+  }
+
+  // ۲. حذف رکورد از جدول تراکنش‌ها
+  await c.env.DB.prepare('DELETE FROM transactions WHERE id = ? AND user_id = ?')
+    .bind(id, userId)
+    .run();
+
+  return c.json({
+    success: true,
+    message: 'تراکنش با موفقیت حذف شد و در صورت اسکن مجدد موبایل ثبت نخواهد شد',
+  });
 });
 
 /**

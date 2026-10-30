@@ -49,9 +49,16 @@ export function isLikelyBankSms(text: string): boolean {
     return false;
   }
 
+  // پیامک‌های صورتحساب، قبض و بسته‌های اپراتورها (همراه اول، ایرانسل، مخابرات و...) تراکنش بانکی نیستند
+  if (/همراه اول|همراه‌اول|ایرانسل|رایتل|مخابرات/i.test(text)) {
+    if (/صورت[‌\s]*حساب|بدهی پیشین|مهلت پرداخت|پرداخت شما به مبلغ.*دریافت شد|بسته اینترنت|شارژ سیم[‌\s]*کارت|ش ق:|ش پ:/i.test(text)) {
+      return false;
+    }
+  }
+
   // وجود کلیدواژه‌های مالی پایه
   const hasFinancialKeyword =
-    /برداشت|واریز|خرید|مانده|موجودی|حساب|کارت|تراکنش|صورتحساب|پایانه/i.test(text);
+    /برداشت|واریز|خرید|مانده|موجودی|حساب|کارت|تراکنش|صورتحساب|پایانه|انتقال/i.test(text);
 
   // وجود ارقام همراه با نشانگر مبلغ یا واحد پولی
   const hasCurrencyOrAmount =
@@ -116,9 +123,9 @@ export function extractAmount(
   text: string,
   defaultCurrency: 'rial' | 'toman' = 'rial'
 ): number {
-  // ۱. الگو با عبارت صریح «مبلغ» یا «به مبلغ» یا «خرید/واریز/برداشت»
+  // ۱. الگو با عبارت صریح «مبلغ» یا «به مبلغ» یا «خرید/واریز/برداشت/انتقال»
   const explicitAmountRegex =
-    /(?:مبلغ(?:\s*تراکنش)?|به\s*مبلغ|واریز|برداشت|خرید|پرداخت)\s*[:=]?\s*([+-]?[ \t]*[\d,]{3,})\s*(ریال|تومان|تومن|IRR)?/i;
+    /(?:مبلغ(?:\s*تراکنش)?|به\s*مبلغ|(?:واریز|برداشت|خرید|پرداخت|انتقال)\s*[:=]|(?:واریز|برداشت|خرید|پرداخت)(?!\s*(?:از|به|حساب|کارت)))\s*[:=]?\s*([+-]?[ \t]*[\d,]{3,})\s*(ریال|تومان|تومن|IRR)?/i;
   const explicitMatch = text.match(explicitAmountRegex);
 
   if (explicitMatch) {
@@ -147,8 +154,8 @@ export function extractAmount(
     }
   }
 
-  // ۳. الگو با علامت‌های منفی و مثبت در همان خط (بدون عبور از خطوط)
-  const signedAmountRegex = /(?:^|[ \t\n])([+-][ \t]*[\d,]{3,}|[\d,]{3,}[ \t]*[+-])(?=[ \t\r\n]|$)/m;
+  // ۳. الگو با علامت‌های منفی و مثبت در همان خط (شامل دونقطه و فواصل)
+  const signedAmountRegex = /(?:^|[ \t\n:：])([+-][ \t]*[\d,]{3,}|[\d,]{3,}[ \t]*[+-])(?=[ \t\r\n]|$)/m;
   const signedMatch = text.match(signedAmountRegex);
   if (signedMatch) {
     const rawNumber = parseNumber(signedMatch[1]);

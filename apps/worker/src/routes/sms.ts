@@ -1,8 +1,19 @@
 import { Hono } from 'hono';
-import { parseBankSms } from '@jibban/sms-parser-ir';
+import { parseBankSms, normalizePersianText } from '@jibban/sms-parser-ir';
 import { Bindings, Variables } from '../types.js';
 
 export const smsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+/**
+ * محاسبه هش پایدار SHA-256 برای متن پیامک نرمالایز شده
+ */
+export async function computeSmsHash(rawSms: string): Promise<string> {
+  const normalized = normalizePersianText(rawSms).replace(/\s+/g, ' ').trim();
+  const msgUint8 = new TextEncoder().encode(normalized);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 /**
  * حدس هوشمند دسته‌بندی هزینه بر اساس توضیحات یا نوع تراکنش
@@ -38,10 +49,33 @@ function autoDetectCategory(description?: string, type?: 'debit' | 'credit'): st
 }
 
 /**
+ * دریافت گزارش پیامک‌های خام ثبت شده و وضعیت آن‌ها
+ */
+smsRouter.get('/logs', async (c) => {
+  const userId = c.get('userId');
+  const limit = Math.min(200, parseInt(c.req.query('limit') || '50', 10));
+  const offset = parseInt(c.req.query('offset') || '0', 10);
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT * FROM raw_sms WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`
+  )
+    .bind(userId, limit, offset)
+    .all();
+
+  return c.json({ success: true, data: results });
+});
+
+/**
  * دریافت متن پیامک از اپ اندروید، استخراج پارامترها و ذخیره در پایگاه داده
+ * همراه با تشخیص هش یکتا برای جلوگیری از ثبت تکراری و حفظ سابقه حذف‌های کاربر
  */
 smsRouter.post('/ingest', async (c) => {
-  const body = await c.req.json<{ rawSms?: string; syncToken?: string }>();
+  const body = await c.req.json<{
+    rawSms?: string;
+    syncToken?: string;
+    sender?: string;
+    timestamp?: number;
+  }>();
   const rawSms = body.rawSms;
 
   if (!rawSms || typeof rawSms !== 'string') {
@@ -59,10 +93,70 @@ smsRouter.post('/ingest', async (c) => {
     }
   }
 
-  // ۲. استخراج و پارس پیامک با موتور @jibban/sms-parser-ir
+  // ۲. محاسبه هش یکتای پیامک
+  const smsHash = await computeSmsHash(rawSms);
+  const receivedAt = body.timestamp
+    ? new Date(body.timestamp).toISOString()
+    : new Date().toISOString();
+
+  // ۳. بررسی دیتابیس پیامک‌های قبلی (Deduplication & Deleted Retention)
+  const existingSms = await c.env.DB.prepare(
+    'SELECT id, status, transaction_id FROM raw_sms WHERE sms_hash = ? AND user_id = ?'
+  )
+    .bind(smsHash, userId)
+    .first<{ id: string; status: 'processed' | 'ignored' | 'deleted' | 'manual'; transaction_id: string | null }>();
+
+  if (existingSms) {
+    if (existingSms.status === 'deleted') {
+      return c.json(
+        {
+          success: true,
+          alreadyProcessed: true,
+          status: 'deleted',
+          message: 'این پیامک قبلاً توسط کاربر حذف شده و برای جلوگیری از بازگشت نادیده گرفته شد',
+        },
+        200
+      );
+    }
+
+    if (existingSms.status === 'processed') {
+      return c.json(
+        {
+          success: true,
+          alreadyProcessed: true,
+          status: 'processed',
+          transactionId: existingSms.transaction_id,
+          message: 'این پیامک قبلاً ثبت شده است (جلوگیری از رکورد تکراری)',
+        },
+        200
+      );
+    }
+
+    if (existingSms.status === 'ignored') {
+      return c.json(
+        {
+          success: false,
+          alreadyProcessed: true,
+          isBankSms: false,
+          message: 'پیامک قبلاً غیربانکی تشخیص داده شده است',
+        },
+        200
+      );
+    }
+  }
+
+  // ۴. استخراج و پارس پیامک با موتور @jibban/sms-parser-ir
   const parsed = parseBankSms(rawSms);
 
   if (!parsed.isBankSms || parsed.amount <= 0) {
+    // ثبت در پایگاه داده پیامک‌های خام با وضعیت نادیده‌گرفته‌شده (ignored)
+    await c.env.DB.prepare(
+      `INSERT INTO raw_sms (id, sms_hash, user_id, sender, raw_text, status, received_at)
+       VALUES (?, ?, ?, ?, ?, 'ignored', ?)`
+    )
+      .bind(smsHash, smsHash, userId, body.sender ?? null, rawSms, receivedAt)
+      .run();
+
     return c.json(
       {
         success: false,
@@ -73,19 +167,19 @@ smsRouter.post('/ingest', async (c) => {
     );
   }
 
-  // ۳. حدس دسته‌بندی اولیه
+  // ۵. حدس دسته‌بندی اولیه و ایجاد شناسه تراکنش
   const categoryId = autoDetectCategory(parsed.description, parsed.type);
   const transactionId = `tx_${crypto.randomUUID()}`;
-  const transactionDate = parsed.transactionDate || new Date().toISOString();
+  const transactionDate = parsed.transactionDate || receivedAt;
 
-  // ۴. ثبت تراکنش در پایگاه داده D1
-  await c.env.DB.prepare(
-    `INSERT INTO transactions (
-      id, user_id, bank_name, account_number, amount, type,
-      balance, category_id, description, raw_sms, transaction_date
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  )
-    .bind(
+  // ۶. ثبت تراکنش و پیامک خام به صورت یکپارچه با DB.batch
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO transactions (
+        id, user_id, bank_name, account_number, amount, type,
+        balance, category_id, description, raw_sms, sms_hash, transaction_date
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
       transactionId,
       userId,
       parsed.bankName,
@@ -96,9 +190,23 @@ smsRouter.post('/ingest', async (c) => {
       categoryId,
       parsed.description ?? null,
       rawSms,
+      smsHash,
       transactionDate
-    )
-    .run();
+    ),
+    c.env.DB.prepare(
+      `INSERT INTO raw_sms (
+        id, sms_hash, user_id, sender, raw_text, status, transaction_id, received_at
+      ) VALUES (?, ?, ?, ?, ?, 'processed', ?, ?)`
+    ).bind(
+      smsHash,
+      smsHash,
+      userId,
+      body.sender ?? null,
+      rawSms,
+      transactionId,
+      receivedAt
+    ),
+  ]);
 
   const createdTx = {
     id: transactionId,
@@ -111,6 +219,7 @@ smsRouter.post('/ingest', async (c) => {
     categoryId,
     description: parsed.description,
     rawSms,
+    smsHash,
     transactionDate,
   };
 
