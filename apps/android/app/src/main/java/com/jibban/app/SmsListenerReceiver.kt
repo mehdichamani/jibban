@@ -84,7 +84,7 @@ class SmsListenerReceiver : BroadcastReceiver() {
     /**
      * بررسی سریع کلیدواژه‌های پیامک‌های بانکی
      */
-    private fun isBankMessage(text: string): Boolean {
+    private fun isBankMessage(text: String): Boolean {
         if (text.length < 15) return false
 
         // کدهای تایید و رمز پویا رد می‌شوند
@@ -121,7 +121,7 @@ class SmsListenerReceiver : BroadcastReceiver() {
         }
 
         val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.createChooser(intent, "").flags
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val pendingIntent = PendingIntent.getActivity(
             context,
