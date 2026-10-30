@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">جیب‌بان</string>
+    <string name="sms_received_title">تراکنش جدید در جیب‌بان</string>
+    <string name="sms_sync_success">پیامک بانکی با موفقیت در فضای ابری پردازش شد</string>
+    <string name="sms_sync_failed">خطا در ارسال پیامک به سرور ابری</string>
+    <string name="permission_required_title">دسترسی به پیامک‌های بانکی</string>
+    <string name="permission_required_desc">برای استخراج خودکار مبالغ واریز و برداشت بدون نیاز به ثبت دستی، لطفاً دسترسی پیامک را تایید نمایید.</string>
+</resources>
