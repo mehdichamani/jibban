@@ -1,0 +1,24 @@
+{
+  "name": "jibban-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "جیب‌بان: سامانه یکپارچه حسابداری شخصی، مدیریت دنگ و پردازشگر پیامک‌های بانکی ایران",
+  "scripts": {
+    "dev:web": "pnpm --filter @jibban/web dev",
+    "dev:worker": "pnpm --filter @jibban/worker dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test"
+  },
+  "keywords": [
+    "jibban",
+    "accounting",
+    "splitwise",
+    "persian-bank-sms",
+    "cloudflare-workers",
+    "d1",
+    "pwa"
+  ],
+  "author": "",
+  "license": "MIT",
+  "packageManager": "pnpm@12.15.0"
+}
