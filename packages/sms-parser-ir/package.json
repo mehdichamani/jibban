@@ -1,10 +1,17 @@
 {
   "name": "@jibban/sms-parser-ir",
   "version": "0.1.0",
+  "type": "module",
   "description": "استخراج‌گر و پردازشگر هوشمند پیامک‌های بانکی ایران برای ۲۶+ بانک با موتور فال‌بک معنایی",
   "main": "./dist/index.js",
-  "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
   "files": [
     "dist"
   ],
