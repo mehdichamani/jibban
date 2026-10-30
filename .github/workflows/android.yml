@@ -1,21 +1,32 @@
-name: Build Android APK
+name: Build & Release Signed Android App
 
 on:
   push:
+    tags:
+      - 'v*'
     branches:
       - main
-      - master
     paths:
       - 'apps/android/**'
       - '.github/workflows/android.yml'
-  pull_request:
-    paths:
-      - 'apps/android/**'
-  workflow_dispatch: # امکان اجرای دستی از تب Actions در گیت‌هاب
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publish as official GitHub Release?'
+        required: true
+        type: boolean
+        default: true
+      version_tag:
+        description: 'Release Tag name (e.g. v0.1.0)'
+        required: false
+        default: 'v0.1.0'
+
+permissions:
+  contents: write
 
 jobs:
   build:
-    name: Build JibBan Android App
+    name: Build Signed Release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -33,13 +44,75 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
-      - name: Build Debug APK
-        working-directory: apps/android
-        run: gradle assembleDebug --stacktrace
+      - name: Configure Keystore from Secrets
+        id: signing
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/keystore
+          echo "$KEYSTORE_B64" | base64 -d > /tmp/keystore/release.p12
+          chmod 600 /tmp/keystore/release.p12
 
-      - name: Upload Debug APK Artifact
+          echo "RELEASE_KEYSTORE_PATH=/tmp/keystore/release.p12" >> $GITHUB_ENV
+          echo "RELEASE_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> $GITHUB_ENV
+          echo "RELEASE_KEY_ALIAS=$KEY_ALIAS" >> $GITHUB_ENV
+          echo "RELEASE_KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
+
+      - name: Build Signed Release APK
+        working-directory: apps/android
+        run: gradle assembleRelease --stacktrace
+
+      - name: Locate and Package Release Artifacts
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apks=(apps/android/app/build/outputs/apk/release/*-release.apk apps/android/app/build/outputs/apk/release/*.apk)
+          if [[ "${#apks[@]}" -eq 0 ]]; then
+            echo "::error::No release APK found!"
+            exit 1
+          fi
+
+          mkdir -p release-output
+          cp "${apks[0]}" release-output/JibBan-release.apk
+          cd release-output
+          sha256sum JibBan-release.apk > JibBan-release.apk.sha256
+          cd ..
+
+      - name: Upload Release Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: JibBan-debug-apk
-          path: apps/android/app/build/outputs/apk/debug/*.apk
-          retention-days: 14
+          name: JibBan-signed-release-apk
+          path: release-output/*
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || github.event.inputs.version_tag || 'v0.1.0' }}
+          name: JibBan ${{ github.ref_name || github.event.inputs.version_tag || 'v0.1.0' }} (Official Signed Release)
+          draft: false
+          prerelease: false
+          body: |
+            ### 📱 نسخه رسمی و امضاشده اپلیکیشن جیب‌بان (JibBan)
+            
+            - **امضا شده با کلید اختصاصی رسمی (`quik_release`)**
+            - **نوع خروجی:** Release APK نهایی
+            - **امکانات:**
+              - شنود خودکار پیامک‌های بانکی و ارسال امن به `jibban-api.ajbv.ir`
+              - اسکن و درون‌ریزی پیامک‌های پیشین از صندوق ورودی گوشی (Inbox Scanner)
+              - رفع تداخل نوار وضعیت اندروید (Status Bar)
+            
+            **چک‌سام SHA256 ضمیمه شده است.**
+          files: |
+            release-output/JibBan-release.apk
+            release-output/JibBan-release.apk.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

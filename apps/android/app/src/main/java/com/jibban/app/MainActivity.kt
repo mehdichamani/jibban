@@ -4,8 +4,10 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.webkit.*
 import android.widget.ProgressBar
@@ -15,6 +17,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * اکتیویتی اصلی جیب‌بان و میزبان Full WebView برای اجرای رابط کاربری React PWA
@@ -44,6 +50,14 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // تنظیم پدینگ هوشمند برای جلوگیری از تداخل هدر با نوار وضعیت گوشی (Status Bar / Notch)
+        val root = findViewById<View>(R.id.rootContainer)
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val statusBarInsets = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(0, statusBarInsets.top, 0, 0)
+            insets
+        }
 
         prefsManager = PrefsManager(this)
         webView = findViewById(R.id.webView)
@@ -170,8 +184,96 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun isAndroidApp(): Boolean {
+            return true
+        }
+
+        @JavascriptInterface
         fun getAppVersion(): String {
             return "0.1.0"
+        }
+
+        @JavascriptInterface
+        fun isSmsPermissionGranted(): Boolean {
+            return ContextCompat.checkSelfPermission(
+                activity,
+                Manifest.permission.READ_SMS
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+
+        @JavascriptInterface
+        fun requestSmsPermissions() {
+            activity.runOnUiThread {
+                activity.checkAndRequestPermissions()
+            }
+        }
+
+        /**
+         * اسکن پیامک‌های قبلی صندوق ورودی گوشی و فیلتر پیامک‌های بانکی
+         */
+        @JavascriptInterface
+        fun scanInboxSms(limit: Int): String {
+            val maxLimit = if (limit in 1..300) limit else 50
+            val result = JSONObject()
+
+            if (ContextCompat.checkSelfPermission(
+                    activity,
+                    Manifest.permission.READ_SMS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                result.put("success", false)
+                result.put("error", "permission_denied")
+                result.put("message", "دسترسی خواندن پیامک‌ها تایید نشده است.")
+                return result.toString()
+            }
+
+            try {
+                val uri = Uri.parse("content://sms/inbox")
+                val projection = arrayOf("address", "body", "date")
+                val cursor = activity.contentResolver.query(
+                    uri,
+                    projection,
+                    null,
+                    null,
+                    "date DESC"
+                )
+
+                val bankList = JSONArray()
+                var scannedCount = 0
+
+                cursor?.use {
+                    val bodyIndex = it.getColumnIndex("body")
+                    val addressIndex = it.getColumnIndex("address")
+                    val dateIndex = it.getColumnIndex("date")
+
+                    while (it.moveToNext() && scannedCount < maxLimit) {
+                        scannedCount++
+                        val body = if (bodyIndex != -1) it.getString(bodyIndex) ?: "" else ""
+                        val address = if (addressIndex != -1) it.getString(addressIndex) ?: "" else ""
+                        val date = if (dateIndex != -1) it.getLong(dateIndex) else System.currentTimeMillis()
+
+                        if (SmsListenerReceiver.isBankMessage(body)) {
+                            val item = JSONObject().apply {
+                                put("body", body)
+                                put("sender", address)
+                                put("timestamp", date)
+                            }
+                            bankList.put(item)
+                        }
+                    }
+                }
+
+                result.put("success", true)
+                result.put("scannedCount", scannedCount)
+                result.put("bankFoundCount", bankList.length())
+                result.put("messages", bankList)
+            } catch (e: Exception) {
+                Log.e("MainActivity", "خطا در اسکن پیامک‌های صندوق ورودی", e)
+                result.put("success", false)
+                result.put("error", e.message ?: "خطای ناشناخته")
+            }
+
+            return result.toString()
         }
 
         @JavascriptInterface

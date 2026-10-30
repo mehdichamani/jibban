@@ -81,28 +81,7 @@ class SmsListenerReceiver : BroadcastReceiver() {
         }
     }
 
-    /**
-     * بررسی سریع کلیدواژه‌های پیامک‌های بانکی
-     */
-    private fun isBankMessage(text: String): Boolean {
-        if (text.length < 15) return false
 
-        // کدهای تایید و رمز پویا رد می‌شوند
-        if (text.contains("کد تایید") || text.contains("رمز پویا") || text.contains("کد ورود")) {
-            return false
-        }
-
-        val hasAction = text.contains("برداشت") || text.contains("واریز") ||
-                text.contains("خرید") || text.contains("انتقال") || text.contains("پرداخت")
-
-        val hasAccount = text.contains("حساب") || text.contains("کارت") ||
-                text.contains("مانده") || text.contains("موجودی")
-
-        val hasCurrency = text.contains("ریال") || text.contains("تومان") ||
-                text.contains("IRR") || text.contains("بلو")
-
-        return (hasAction && (hasAccount || hasCurrency))
-    }
 
     private fun showNotification(context: Context, title: String, content: String) {
         val notificationManager =
@@ -148,5 +127,28 @@ class SmsListenerReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "JibBan_SmsReceiver"
+
+        /**
+         * بررسی سریع کلیدواژه‌های پیامک‌های بانکی
+         */
+        fun isBankMessage(text: String): Boolean {
+            if (text.length < 15) return false
+
+            // کدهای تایید و رمز پویا رد می‌شوند
+            if (text.contains("کد تایید") || text.contains("رمز پویا") || text.contains("کد ورود")) {
+                return false
+            }
+
+            val hasAction = text.contains("برداشت") || text.contains("واریز") ||
+                    text.contains("خرید") || text.contains("انتقال") || text.contains("پرداخت")
+
+            val hasAccount = text.contains("حساب") || text.contains("کارت") ||
+                    text.contains("مانده") || text.contains("موجودی")
+
+            val hasCurrency = text.contains("ریال") || text.contains("تومان") ||
+                    text.contains("IRR") || text.contains("بلو")
+
+            return (hasAction && (hasAccount || hasCurrency))
+        }
     }
 }
