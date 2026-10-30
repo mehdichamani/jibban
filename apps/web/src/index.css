@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 :root {
   --font-sans: 'Vazirmatn', system-ui, -apple-system, sans-serif;
   --bg-main: #090d16;
@@ -27,8 +29,6 @@
 
 * {
   box-sizing: border-box;
-  margin: 0;
-  padding: 0;
 }
 
 body {
