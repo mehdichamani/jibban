@@ -1,27 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import { Transaction, Category } from './types.js';
+import { Transaction, Category, Account } from './types.js';
 import { api } from './lib/api.js';
 import { Header } from './components/Header.js';
 import { Navigation, TabType } from './components/Navigation.js';
 import { TransactionsTab } from './components/TransactionsTab.js';
+import { AccountsTab } from './components/AccountsTab.js';
 import { SplitwiseTab } from './components/SplitwiseTab.js';
 import { AnalyticsTab } from './components/AnalyticsTab.js';
 import { SettingsTab } from './components/SettingsTab.js';
 import { SmsSimulatorModal } from './components/SmsSimulatorModal.js';
 import { ToSplitModal } from './components/ToSplitModal.js';
 import { AddExpenseModal } from './components/AddExpenseModal.js';
-import { Sparkles, CheckCircle2 } from 'lucide-react';
+import { AddTransactionModal } from './components/AddTransactionModal.js';
+import { CheckCircle2 } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('transactions');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // وضعیت‌های مودال
   const [isSimulatorOpen, setIsSimulatorOpen] = useState<boolean>(false);
   const [splitModalTx, setSplitModalTx] = useState<Transaction | null>(null);
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState<boolean>(false);
+  const [isAddTxOpen, setIsAddTxOpen] = useState<boolean>(false);
 
   // پیام موفقیت عمومی
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -34,11 +39,13 @@ export const App: React.FC = () => {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [txList, catList] = await Promise.all([
+      const [txList, accList, catList] = await Promise.all([
         api.getTransactions(),
+        api.getAccounts(),
         api.getCategories(),
       ]);
       setTransactions(txList);
+      setAccounts(accList);
       setCategories(catList);
     } finally {
       setIsLoading(false);
@@ -49,12 +56,74 @@ export const App: React.FC = () => {
     loadData();
   }, []);
 
-  // ثبت پیامک جدید از شبیه‌ساز
+  // ثبت تراکنش جدید حسابداری
+  const handleAddTransaction = async (data: {
+    amount: number;
+    type: 'debit' | 'credit' | 'transfer';
+    fromAccountId?: string;
+    toAccountId?: string;
+    categoryId?: string;
+    description?: string;
+    trackingCode?: string;
+    transactionDate?: string;
+  }) => {
+    const newTx = await api.createTransaction(data);
+    setTransactions((prev) => [newTx, ...prev]);
+
+    // بارگذاری مجدد مانده حساب‌ها
+    const updatedAccounts = await api.getAccounts();
+    setAccounts(updatedAccounts);
+
+    const typeLabel = data.type === 'debit' ? 'هزینه' : data.type === 'credit' ? 'درآمد' : 'انتقال بین‌حسابی';
+    showToast(`تراکنش ${typeLabel} به مبلغ ${new Intl.NumberFormat('fa-IR').format(data.amount)} ت ثبت شد.`);
+  };
+
+  // حذف تراکنش
+  const handleDeleteTransaction = async (id: string) => {
+    await api.deleteTransaction(id);
+    setTransactions((prev) => prev.filter((t) => t.id !== id));
+    const updatedAccounts = await api.getAccounts();
+    setAccounts(updatedAccounts);
+    showToast('تراکنش با موفقیت حذف و اثر مالی آن بازگردانده شد.');
+  };
+
+  // تعریف حساب جدید
+  const handleAddAccount = async (accountData: Partial<Account>) => {
+    const newAcc = await api.createAccount(accountData as any);
+    setAccounts((prev) => [...prev, newAcc]);
+    showToast(`حساب "${newAcc.name}" با موفقیت تعریف شد.`);
+  };
+
+  // ویرایش حساب
+  const handleUpdateAccount = async (id: string, accountData: Partial<Account>) => {
+    await api.updateAccount(id, accountData);
+    const updated = await api.getAccounts();
+    setAccounts(updated);
+    showToast('اطلاعات حساب با موفقیت بروزرسانی شد.');
+  };
+
+  // حذف حساب
+  const handleDeleteAccount = async (id: string) => {
+    await api.deleteAccount(id);
+    const updated = await api.getAccounts();
+    setAccounts(updated);
+    showToast('حساب با موفقیت حذف یا بایگانی شد.');
+  };
+
+  // هدایت از حساب‌ها به تب تراکنش‌ها برای مشاهده گردش حساب
+  const handleSelectAccountTransactions = (accountId: string) => {
+    setSelectedAccountId(accountId);
+    setActiveTab('transactions');
+  };
+
+  // ثبت پیامک جدید از شبیه‌ساز یا دستگاه اندروید
   const handleSaveSmsTransaction = async (smsText: string) => {
     const res = await api.ingestSms(smsText);
     if (res.success && res.transaction) {
       setTransactions((prev) => [res.transaction!, ...prev]);
-      showToast(`پیامک ${res.transaction.bankName} با موفقیت پردازش و ثبت شد!`);
+      const updatedAccounts = await api.getAccounts();
+      setAccounts(updatedAccounts);
+      showToast(`پیامک ${res.transaction.bankName || 'بانکی'} با موفقیت پردازش و ثبت شد!`);
     } else {
       showToast(res.message || 'خطا در ثبت پیامک');
     }
@@ -63,7 +132,7 @@ export const App: React.FC = () => {
   // تبدیل تراکنش به دنگ
   const handleConfirmSplit = async (tx: Transaction, groupId: string, participants: string[]) => {
     await api.convertToSplit(tx.id, groupId, participants);
-    showToast(`تراکنش "${tx.description || tx.bankName}" با موفقیت بین اعضا تقسیم شد.`);
+    showToast(`تراکنش "${tx.description || tx.bankName || 'بانکی'}" با موفقیت بین اعضا تقسیم شد.`);
   };
 
   // ثبت هزینه جدید گروهی
@@ -86,7 +155,7 @@ export const App: React.FC = () => {
 
       {/* محتوای اصلی */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 pt-4 sm:pt-6">
-        {/* نوار ناوبری بالا در دسکتاپ و پایین در موبایل */}
+        {/* نوار ناوبری اصلی */}
         <Navigation activeTab={activeTab} onChangeTab={setActiveTab} />
 
         <div className="mt-5">
@@ -94,7 +163,22 @@ export const App: React.FC = () => {
             <TransactionsTab
               transactions={transactions}
               categories={categories}
+              accounts={accounts}
+              selectedAccountId={selectedAccountId}
+              onSelectAccount={setSelectedAccountId}
+              onOpenAddModal={() => setIsAddTxOpen(true)}
               onOpenSplitModal={(tx) => setSplitModalTx(tx)}
+              onDeleteTransaction={handleDeleteTransaction}
+            />
+          )}
+
+          {activeTab === 'accounts' && (
+            <AccountsTab
+              accounts={accounts}
+              onAddAccount={handleAddAccount}
+              onUpdateAccount={handleUpdateAccount}
+              onDeleteAccount={handleDeleteAccount}
+              onSelectAccountTransactions={handleSelectAccountTransactions}
             />
           )}
 
@@ -103,12 +187,25 @@ export const App: React.FC = () => {
           )}
 
           {activeTab === 'analytics' && (
-            <AnalyticsTab transactions={transactions} categories={categories} />
+            <AnalyticsTab
+              transactions={transactions}
+              categories={categories}
+              accounts={accounts}
+            />
           )}
 
           {activeTab === 'settings' && <SettingsTab />}
         </div>
       </main>
+
+      {/* مودال ثبت تراکنش جدید حسابداری */}
+      <AddTransactionModal
+        isOpen={isAddTxOpen}
+        onClose={() => setIsAddTxOpen(false)}
+        accounts={accounts}
+        categories={categories}
+        onAddTransaction={handleAddTransaction}
+      />
 
       {/* مودال شبیه‌ساز پیامک بانکی */}
       <SmsSimulatorModal

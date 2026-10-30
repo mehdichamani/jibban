@@ -5,13 +5,16 @@ import { Bindings, Variables } from '../types.js';
 export const transactionsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 /**
- * دریافت لیست تراکنش‌ها با فیلتر دسته‌بندی، نوع و بازه زمانی
+ * دریافت لیست تراکنش‌ها با فیلتر دسته‌بندی، نوع، حساب مبدا یا مقصد و بازه زمانی
  */
 transactionsRouter.get('/', async (c) => {
   const userId = c.get('userId');
-  const type = c.req.query('type'); // 'debit' | 'credit'
+  const type = c.req.query('type'); // 'debit' | 'credit' | 'transfer'
   const categoryId = c.req.query('categoryId');
-  const limit = Math.min(100, parseInt(c.req.query('limit') || '50', 10));
+  const accountId = c.req.query('accountId'); // فیلتر تراکنش‌های یک حساب (چه مبدا باشد چه مقصد)
+  const fromAccountId = c.req.query('fromAccountId');
+  const toAccountId = c.req.query('toAccountId');
+  const limit = Math.min(200, parseInt(c.req.query('limit') || '100', 10));
   const offset = parseInt(c.req.query('offset') || '0', 10);
 
   let query = `
@@ -19,11 +22,17 @@ transactionsRouter.get('/', async (c) => {
       t.id, t.user_id as userId, t.bank_name as bankName,
       t.account_number as accountNumber, t.amount, t.type,
       t.balance, t.category_id as categoryId, t.description,
+      t.tracking_code as trackingCode,
+      t.from_account_id as fromAccountId, t.to_account_id as toAccountId,
       t.raw_sms as rawSms, t.sms_hash as smsHash,
       t.transaction_date as transactionDate, t.created_at as createdAt,
-      c.name as categoryName, c.icon as categoryIcon, c.color as categoryColor
+      c.name as categoryName, c.icon as categoryIcon, c.color as categoryColor,
+      fa.name as fromAccountName, fa.color as fromAccountColor, fa.icon as fromAccountIcon, fa.bank_name as fromAccountBankName,
+      ta.name as toAccountName, ta.color as toAccountColor, ta.icon as toAccountIcon, ta.bank_name as toAccountBankName
     FROM transactions t
     LEFT JOIN categories c ON t.category_id = c.id
+    LEFT JOIN accounts fa ON t.from_account_id = fa.id
+    LEFT JOIN accounts ta ON t.to_account_id = ta.id
     WHERE t.user_id = ?
   `;
 
@@ -39,6 +48,21 @@ transactionsRouter.get('/', async (c) => {
     params.push(categoryId);
   }
 
+  if (accountId) {
+    query += ` AND (t.from_account_id = ? OR t.to_account_id = ?)`;
+    params.push(accountId, accountId);
+  }
+
+  if (fromAccountId) {
+    query += ` AND t.from_account_id = ?`;
+    params.push(fromAccountId);
+  }
+
+  if (toAccountId) {
+    query += ` AND t.to_account_id = ?`;
+    params.push(toAccountId);
+  }
+
   query += ` ORDER BY t.transaction_date DESC LIMIT ? OFFSET ?`;
   params.push(limit, offset);
 
@@ -52,16 +76,20 @@ transactionsRouter.get('/', async (c) => {
 });
 
 /**
- * ثبت دستی تراکنش جدید (غیرپیامکی)
+ * ثبت تراکنش جدید حسابداری (دستی یا سیستمی) با بروزرسانی موجودی حساب‌های مبدا و مقصد
  */
 transactionsRouter.post('/', async (c) => {
   const userId = c.get('userId');
   const body = await c.req.json<{
     amount: number;
-    type: 'debit' | 'credit';
+    type: 'debit' | 'credit' | 'transfer';
+    fromAccountId?: string;
+    toAccountId?: string;
     categoryId?: string;
     description?: string;
+    trackingCode?: string;
     bankName?: string;
+    accountNumber?: string;
     transactionDate?: string;
   }>();
 
@@ -72,34 +100,79 @@ transactionsRouter.post('/', async (c) => {
   const id = `tx_${crypto.randomUUID()}`;
   const transactionDate = body.transactionDate || new Date().toISOString();
 
-  await c.env.DB.prepare(
-    `INSERT INTO transactions (
-      id, user_id, bank_name, amount, type, category_id, description, transaction_date
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  )
-    .bind(
+  // اگر حساب مبدا ارسال نشده بود ولی نوع تراکنش debit یا transfer بود، تلاش برای تخصیص به حساب پیش‌فرض
+  let fromAccountId = body.fromAccountId ?? null;
+  let toAccountId = body.toAccountId ?? null;
+
+  const statements: D1PreparedStatement[] = [];
+
+  // ۱. ثبت رکورد تراکنش
+  statements.push(
+    c.env.DB.prepare(
+      `INSERT INTO transactions (
+        id, user_id, from_account_id, to_account_id, bank_name, account_number,
+        amount, type, category_id, description, tracking_code, transaction_date
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
       id,
       userId,
-      body.bankName ?? 'ثبت دستی',
+      fromAccountId,
+      toAccountId,
+      body.bankName ?? null,
+      body.accountNumber ?? null,
       body.amount,
       body.type,
-      body.categoryId ?? 'cat_other',
+      body.categoryId ?? (body.type === 'transfer' ? 'cat_transfer' : body.type === 'credit' ? 'cat_income_other' : 'cat_other'),
       body.description ?? null,
+      body.trackingCode ?? null,
       transactionDate
     )
-    .run();
+  );
+
+  // ۲. بروزرسانی تراز حساب مبدا در صورت وجود (کاهش مانده)
+  if (fromAccountId && (body.type === 'debit' || body.type === 'transfer')) {
+    statements.push(
+      c.env.DB.prepare(
+        'UPDATE accounts SET balance = balance - ? WHERE id = ? AND user_id = ?'
+      ).bind(body.amount, fromAccountId, userId)
+    );
+  }
+
+  // ۳. بروزرسانی تراز حساب مقصد در صورت وجود (افزایش مانده)
+  if (toAccountId && (body.type === 'credit' || body.type === 'transfer')) {
+    statements.push(
+      c.env.DB.prepare(
+        'UPDATE accounts SET balance = balance + ? WHERE id = ? AND user_id = ?'
+      ).bind(body.amount, toAccountId, userId)
+    );
+  }
+
+  await c.env.DB.batch(statements);
+
+  // دریافت اطلاعات تکمیلی تراکنش ثبت‌شده جهت بازگشت به فرانت‌اند
+  const savedTx = await c.env.DB.prepare(
+    `SELECT 
+      t.id, t.user_id as userId, t.bank_name as bankName,
+      t.account_number as accountNumber, t.amount, t.type,
+      t.balance, t.category_id as categoryId, t.description,
+      t.tracking_code as trackingCode,
+      t.from_account_id as fromAccountId, t.to_account_id as toAccountId,
+      t.transaction_date as transactionDate, t.created_at as createdAt,
+      c.name as categoryName, c.icon as categoryIcon, c.color as categoryColor,
+      fa.name as fromAccountName, fa.color as fromAccountColor, fa.icon as fromAccountIcon,
+      ta.name as toAccountName, ta.color as toAccountColor, ta.icon as toAccountIcon
+    FROM transactions t
+    LEFT JOIN categories c ON t.category_id = c.id
+    LEFT JOIN accounts fa ON t.from_account_id = fa.id
+    LEFT JOIN accounts ta ON t.to_account_id = ta.id
+    WHERE t.id = ?`
+  )
+    .bind(id)
+    .first();
 
   return c.json({
     success: true,
-    data: {
-      id,
-      userId,
-      amount: body.amount,
-      type: body.type,
-      categoryId: body.categoryId,
-      description: body.description,
-      transactionDate,
-    },
+    data: savedTx,
   }, 201);
 });
 
@@ -108,13 +181,21 @@ transactionsRouter.post('/', async (c) => {
  */
 transactionsRouter.get('/:id', async (c) => {
   const id = c.req.param('id');
+  const userId = c.get('userId');
+
   const tx = await c.env.DB.prepare(
-    `SELECT t.*, c.name as categoryName, c.icon as categoryIcon
+    `SELECT 
+      t.*,
+      c.name as categoryName, c.icon as categoryIcon, c.color as categoryColor,
+      fa.name as fromAccountName, fa.color as fromAccountColor, fa.icon as fromAccountIcon,
+      ta.name as toAccountName, ta.color as toAccountColor, ta.icon as toAccountIcon
      FROM transactions t
      LEFT JOIN categories c ON t.category_id = c.id
-     WHERE t.id = ?`
+     LEFT JOIN accounts fa ON t.from_account_id = fa.id
+     LEFT JOIN accounts ta ON t.to_account_id = ta.id
+     WHERE t.id = ? AND t.user_id = ?`
   )
-    .bind(id)
+    .bind(id, userId)
     .first();
 
   if (!tx) {
@@ -125,7 +206,7 @@ transactionsRouter.get('/:id', async (c) => {
 });
 
 /**
- * ویرایش اطلاعات یک تراکنش (دسته‌بندی، یادداشت، مبلغ، تاریخ و...)
+ * ویرایش اطلاعات یک تراکنش
  */
 transactionsRouter.patch('/:id', async (c) => {
   const id = c.req.param('id');
@@ -133,11 +214,25 @@ transactionsRouter.patch('/:id', async (c) => {
   const body = await c.req.json<{
     categoryId?: string;
     description?: string;
+    fromAccountId?: string | null;
+    toAccountId?: string | null;
+    trackingCode?: string;
     amount?: number;
-    type?: 'debit' | 'credit';
+    type?: 'debit' | 'credit' | 'transfer';
     bankName?: string;
     transactionDate?: string;
   }>();
+
+  // دریافت تراکنش قبلی
+  const oldTx = await c.env.DB.prepare(
+    'SELECT * FROM transactions WHERE id = ? AND user_id = ?'
+  )
+    .bind(id, userId)
+    .first<any>();
+
+  if (!oldTx) {
+    return c.json({ success: false, error: 'تراکنش پیدا نشد یا دسترسی غیرمجاز است' }, 404);
+  }
 
   const updates: string[] = [];
   const params: unknown[] = [];
@@ -150,11 +245,23 @@ transactionsRouter.patch('/:id', async (c) => {
     updates.push('description = ?');
     params.push(body.description);
   }
+  if (body.fromAccountId !== undefined) {
+    updates.push('from_account_id = ?');
+    params.push(body.fromAccountId);
+  }
+  if (body.toAccountId !== undefined) {
+    updates.push('to_account_id = ?');
+    params.push(body.toAccountId);
+  }
+  if (body.trackingCode !== undefined) {
+    updates.push('tracking_code = ?');
+    params.push(body.trackingCode);
+  }
   if (body.amount !== undefined && body.amount > 0) {
     updates.push('amount = ?');
     params.push(body.amount);
   }
-  if (body.type !== undefined && (body.type === 'debit' || body.type === 'credit')) {
+  if (body.type !== undefined && ['debit', 'credit', 'transfer'].includes(body.type)) {
     updates.push('type = ?');
     params.push(body.type);
   }
@@ -171,54 +278,105 @@ transactionsRouter.patch('/:id', async (c) => {
     return c.json({ success: false, error: 'هیچ فیلدی برای تغییر ارسال نشده است' }, 400);
   }
 
-  params.push(id, userId);
-  const query = `UPDATE transactions SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`;
-  const result = await c.env.DB.prepare(query).bind(...params).run();
+  // در صورت تغییر در مبلغ، حساب‌ها یا نوع، مانده‌ها تعدیل شوند
+  const newAmount = body.amount ?? oldTx.amount;
+  const newType = body.type ?? oldTx.type;
+  const newFromId = body.fromAccountId !== undefined ? body.fromAccountId : oldTx.from_account_id;
+  const newToId = body.toAccountId !== undefined ? body.toAccountId : oldTx.to_account_id;
 
-  if (result.meta?.changes === 0) {
-    return c.json({ success: false, error: 'تراکنش پیدا نشد یا دسترسی غیرمجاز است' }, 404);
+  const statements: D1PreparedStatement[] = [];
+
+  // برگشت اثر تراکنش قبلی بر حساب‌ها:
+  if (oldTx.from_account_id && (oldTx.type === 'debit' || oldTx.type === 'transfer')) {
+    statements.push(
+      c.env.DB.prepare('UPDATE accounts SET balance = balance + ? WHERE id = ? AND user_id = ?')
+        .bind(oldTx.amount, oldTx.from_account_id, userId)
+    );
   }
+  if (oldTx.to_account_id && (oldTx.type === 'credit' || oldTx.type === 'transfer')) {
+    statements.push(
+      c.env.DB.prepare('UPDATE accounts SET balance = balance - ? WHERE id = ? AND user_id = ?')
+        .bind(oldTx.amount, oldTx.to_account_id, userId)
+    );
+  }
+
+  // اعمال اثر جدید:
+  if (newFromId && (newType === 'debit' || newType === 'transfer')) {
+    statements.push(
+      c.env.DB.prepare('UPDATE accounts SET balance = balance - ? WHERE id = ? AND user_id = ?')
+        .bind(newAmount, newFromId, userId)
+    );
+  }
+  if (newToId && (newType === 'credit' || newType === 'transfer')) {
+    statements.push(
+      c.env.DB.prepare('UPDATE accounts SET balance = balance + ? WHERE id = ? AND user_id = ?')
+        .bind(newAmount, newToId, userId)
+    );
+  }
+
+  params.push(id, userId);
+  const updateQuery = `UPDATE transactions SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`;
+  statements.push(c.env.DB.prepare(updateQuery).bind(...params));
+
+  await c.env.DB.batch(statements);
 
   return c.json({ success: true, message: 'تراکنش با موفقیت بروزرسانی شد' });
 });
 
 /**
- * حذف یک تراکنش و علامت‌گذاری پیامک خام متناظر با 'deleted'
- * تا در صورت اسکن مجدد موبایل، دوباره در دیتابیس ثبت نشود
+ * حذف یک تراکنش و تعدیل مجدد مانده حساب‌ها و علامت‌گذاری در raw_sms
  */
 transactionsRouter.delete('/:id', async (c) => {
   const id = c.req.param('id');
   const userId = c.get('userId');
 
   const tx = await c.env.DB.prepare(
-    'SELECT id, sms_hash FROM transactions WHERE id = ? AND user_id = ?'
+    'SELECT id, amount, type, from_account_id, to_account_id, sms_hash FROM transactions WHERE id = ? AND user_id = ?'
   )
     .bind(id, userId)
-    .first<{ id: string; sms_hash: string | null }>();
+    .first<any>();
 
   if (!tx) {
     return c.json({ success: false, error: 'تراکنش پیدا نشد' }, 404);
   }
 
-  // ۱. بروزرسانی سابقه در raw_sms برای ماندگاری حذف
-  if (tx.sms_hash) {
-    await c.env.DB.prepare(
-      "UPDATE raw_sms SET status = 'deleted', transaction_id = NULL WHERE sms_hash = ? AND user_id = ?"
-    )
-      .bind(tx.sms_hash, userId)
-      .run();
-  } else {
-    await c.env.DB.prepare(
-      "UPDATE raw_sms SET status = 'deleted', transaction_id = NULL WHERE transaction_id = ? AND user_id = ?"
-    )
-      .bind(id, userId)
-      .run();
+  const statements: D1PreparedStatement[] = [];
+
+  // ۱. برگشت اثر مالی به حساب‌ها
+  if (tx.from_account_id && (tx.type === 'debit' || tx.type === 'transfer')) {
+    statements.push(
+      c.env.DB.prepare('UPDATE accounts SET balance = balance + ? WHERE id = ? AND user_id = ?')
+        .bind(tx.amount, tx.from_account_id, userId)
+    );
+  }
+  if (tx.to_account_id && (tx.type === 'credit' || tx.type === 'transfer')) {
+    statements.push(
+      c.env.DB.prepare('UPDATE accounts SET balance = balance - ? WHERE id = ? AND user_id = ?')
+        .bind(tx.amount, tx.to_account_id, userId)
+    );
   }
 
-  // ۲. حذف رکورد از جدول تراکنش‌ها
-  await c.env.DB.prepare('DELETE FROM transactions WHERE id = ? AND user_id = ?')
-    .bind(id, userId)
-    .run();
+  // ۲. بروزرسانی سابقه در raw_sms برای ماندگاری حذف
+  if (tx.sms_hash) {
+    statements.push(
+      c.env.DB.prepare(
+        "UPDATE raw_sms SET status = 'deleted', transaction_id = NULL WHERE sms_hash = ? AND user_id = ?"
+      ).bind(tx.sms_hash, userId)
+    );
+  } else {
+    statements.push(
+      c.env.DB.prepare(
+        "UPDATE raw_sms SET status = 'deleted', transaction_id = NULL WHERE transaction_id = ? AND user_id = ?"
+      ).bind(id, userId)
+    );
+  }
+
+  // ۳. حذف رکورد از جدول تراکنش‌ها
+  statements.push(
+    c.env.DB.prepare('DELETE FROM transactions WHERE id = ? AND user_id = ?').bind(id, userId)
+  );
+
+  await c.env.DB.batch(statements);
 
   return c.json({
     success: true,
@@ -227,7 +385,7 @@ transactionsRouter.delete('/:id', async (c) => {
 });
 
 /**
- * تبدیل آنی یک تراکنش پیامکی به یک خرج در گروه دنگ (Magic Button)
+ * تبدیل آنی یک تراکنش پیامکی یا حسابداری به یک خرج در گروه دنگ (Magic Button)
  */
 transactionsRouter.post('/:id/to-split', async (c) => {
   const id = c.req.param('id');
@@ -242,9 +400,8 @@ transactionsRouter.post('/:id/to-split', async (c) => {
     return c.json({ success: false, error: 'شناسه گروه دنگ الزامی است' }, 400);
   }
 
-  // ۱. دریافت تراکنش مربوطه
-  const tx = await c.env.DB.prepare('SELECT * FROM transactions WHERE id = ?')
-    .bind(id)
+  const tx = await c.env.DB.prepare('SELECT * FROM transactions WHERE id = ? AND user_id = ?')
+    .bind(id, userId)
     .first<{
       id: string;
       user_id: string;
@@ -258,7 +415,6 @@ transactionsRouter.post('/:id/to-split', async (c) => {
     return c.json({ success: false, error: 'تراکنش مورد نظر پیدا نشد' }, 404);
   }
 
-  // ۲. تعیین اعضای سهیم در این هزینه
   let participants = body.participantIds;
   if (!participants || participants.length === 0) {
     const members = await c.env.DB.prepare(
@@ -274,10 +430,8 @@ transactionsRouter.post('/:id/to-split', async (c) => {
     return c.json({ success: false, error: 'عضوی برای تقسیم دنگ در این گروه یافت نشد' }, 400);
   }
 
-  // ۳. محاسبه سهم مساوی به کمک موتور @jibban/debt-engine
   const splits = calculateEqualSplits(tx.amount, participants);
 
-  // ۴. ثبت هزینه جدید در گروه
   const expenseId = `exp_${crypto.randomUUID()}`;
   const expenseDesc =
     body.description ||
@@ -300,7 +454,6 @@ transactionsRouter.post('/:id/to-split', async (c) => {
     )
     .run();
 
-  // ۵. ثبت سهم‌های تفکیک‌شده
   const splitStatements = splits.map((s) =>
     c.env.DB.prepare(
       'INSERT INTO expense_splits (expense_id, user_id, owed_amount) VALUES (?, ?, ?)'
@@ -311,7 +464,7 @@ transactionsRouter.post('/:id/to-split', async (c) => {
   return c.json(
     {
       success: true,
-      message: 'تراکنش پیامک بانکی با موفقیت به هزینه گروهی دنگ تبدیل شد',
+      message: 'تراکنش با موفقیت به هزینه گروهی دنگ تبدیل شد',
       data: {
         expenseId,
         groupId: body.groupId,

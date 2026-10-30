@@ -6,6 +6,7 @@ import { smsRouter } from './routes/sms.js';
 import { transactionsRouter } from './routes/transactions.js';
 import { groupsRouter } from './routes/groups.js';
 import { categoriesRouter } from './routes/categories.js';
+import { accountsRouter } from './routes/accounts.js';
 import { ensureInitialSeed } from './db/seed.js';
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -69,6 +70,7 @@ app.route('/api/sms', smsRouter);
 app.route('/api/transactions', transactionsRouter);
 app.route('/api/groups', groupsRouter);
 app.route('/api/categories', categoriesRouter);
+app.route('/api/accounts', accountsRouter);
 
 // ۷. صفحه اصلی
 app.get('/', (c) => {
