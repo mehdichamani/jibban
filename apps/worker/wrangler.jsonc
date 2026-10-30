@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jibban-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-10-30",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "jibban-db",
+      "database_id": "jibban-d1-local"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "jibban-kv-local"
+    }
+  ]
+}

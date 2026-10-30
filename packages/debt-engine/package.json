@@ -1,0 +1,26 @@
+{
+  "name": "@jibban/debt-engine",
+  "version": "0.1.0",
+  "description": "هسته محاسبات دنگ، تسهیم مخارج و الگوریتم ساده‌سازی تسویه بدهی‌های گروهی بر پایه Spliit",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "jibban",
+    "debt",
+    "engine",
+    "splitwise",
+    "spliit",
+    "settlement",
+    "graph-simplification"
+  ],
+  "author": "JibBan Contributors",
+  "license": "MIT"
+}
