@@ -10,13 +10,13 @@
     {
       "binding": "DB",
       "database_name": "jibban-db",
-      "database_id": "jibban-d1-local"
+      "database_id": "4cb696db-3a9b-4b8d-a5ae-c051523f8666"
     }
   ],
   "kv_namespaces": [
     {
       "binding": "KV",
-      "id": "jibban-kv-local"
+      "id": "f6b0c489154d4503ab2a087ef540f634"
     }
   ]
 }

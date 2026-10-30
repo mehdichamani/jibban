@@ -37,8 +37,8 @@ class PrefsManager(context: Context) {
         // توکن اولیه پیش‌فرض برای همگام‌سازی آسان
         const val DEFAULT_SYNC_TOKEN = "jibban_sync_demo_token_12345"
 
-        // در شبیه‌ساز اندروید آدرس 10.0.2.2 به localhost سیستم میزبان اشاره دارد
-        const val DEFAULT_SERVER_URL = "http://10.0.2.2:8787"
-        const val DEFAULT_WEB_APP_URL = "http://10.0.2.2:5173"
+        // آدرس‌های سرور ابری کلادفلر و وب‌اپلیکیشن
+        const val DEFAULT_SERVER_URL = "https://jibban-worker.mahdi-chamani20.workers.dev"
+        const val DEFAULT_WEB_APP_URL = "https://jibban-web.pages.dev"
     }
 }
