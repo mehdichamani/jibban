@@ -9,8 +9,20 @@ export const SettingsTab: React.FC = () => {
   const [resetDone, setResetDone] = useState<boolean>(false);
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [scanResult, setScanResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isAndroid, setIsAndroid] = useState<boolean>(() => {
+    return typeof window !== 'undefined' && Boolean((window as any).AndroidBridge);
+  });
 
-  const isAndroid = typeof window !== 'undefined' && Boolean((window as any).AndroidBridge);
+  React.useEffect(() => {
+    const check = () => {
+      if (typeof window !== 'undefined' && (window as any).AndroidBridge) {
+        setIsAndroid(true);
+      }
+    };
+    check();
+    const interval = setInterval(check, 400);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(token);
@@ -168,48 +180,48 @@ export const SettingsTab: React.FC = () => {
           </div>
         </div>
 
-        {isAndroid ? (
-          <div className="pt-1 space-y-3">
-            <button
-              onClick={handleScanInbox}
-              disabled={isScanning}
-              className="btn btn-primary w-full py-2.5 px-4 text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-lg shadow-emerald-600/20"
-            >
-              {isScanning ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin text-white" />
-                  <span>در حال بررسی صندوق ورودی و پردازش پیامک‌های بانکی...</span>
-                </>
-              ) : (
-                <>
-                  <Download className="w-4 h-4" />
-                  <span>شروع اسکن و درون‌ریزی پیامک‌های بانکی گوشی</span>
-                </>
-              )}
-            </button>
-
-            {scanResult && (
-              <div
-                className={`p-3 rounded-xl text-xs flex items-start gap-2.5 ${
-                  scanResult.success
-                    ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
-                    : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
-                }`}
-              >
-                {scanResult.success ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                ) : (
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                )}
-                <span>{scanResult.message}</span>
-              </div>
+        <div className="pt-1 space-y-3">
+          <button
+            onClick={handleScanInbox}
+            disabled={isScanning}
+            className="btn btn-primary w-full py-2.5 px-4 text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-lg shadow-emerald-600/20"
+          >
+            {isScanning ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-white" />
+                <span>در حال بررسی صندوق ورودی و پردازش پیامک‌های بانکی...</span>
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4" />
+                <span>شروع اسکن و درون‌ریزی پیامک‌های بانکی گوشی</span>
+              </>
             )}
-          </div>
-        ) : (
-          <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400 flex items-center justify-between gap-3">
-            <span>برای استفاده از اسکن مستقیم پیامک‌های گوشی، از اپلیکیشن اندروید جیب‌بان استفاده فرمایید.</span>
-          </div>
-        )}
+          </button>
+
+          {!isAndroid && (
+            <div className="text-[11px] text-amber-300/80 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5 leading-relaxed">
+              💡 برای اسکن مستقیم پیامک‌های گوشی، لطفاً از اپلیکیشن اندروید جیب‌بان استفاده فرمایید.
+            </div>
+          )}
+
+          {scanResult && (
+            <div
+              className={`p-3 rounded-xl text-xs flex items-start gap-2.5 ${
+                scanResult.success
+                  ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+                  : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
+              }`}
+            >
+              {scanResult.success ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              )}
+              <span>{scanResult.message}</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* راهنمای اتصال اپلیکیشن اندروید (فاز ۵) */}
