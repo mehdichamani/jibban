@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Soft Minimal Material Elevation Shadow -->
+    <filter id="m3-clean-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.35" />
+    </filter>
+
+    <filter id="m3-card-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.25" />
+    </filter>
+
+    <filter id="m3-flap-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="-4" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.3" />
+    </filter>
+
+    <!-- Clean Solid / Subtle Tonal Gradients -->
+    <linearGradient id="m3-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+
+    <!-- Minimal Card (Vibrant Indigo-Sky) -->
+    <linearGradient id="card-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa" />
+      <stop offset="100%" stop-color="#2563eb" />
+    </linearGradient>
+
+    <!-- Wallet Body (Minimal Teal-Cyan / Sky) -->
+    <linearGradient id="wallet-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+
+    <!-- Wallet Flap (Material Purple) -->
+    <linearGradient id="flap-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a855f7" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+
+    <!-- Clasp (Clean Emerald Accent) -->
+    <linearGradient id="clasp-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="100%" stop-color="#10b981" />
+    </linearGradient>
+  </defs>
+
+  <!-- Android Launcher Adaptive Squircle Container -->
+  <rect width="512" height="512" rx="112" fill="url(#m3-bg)" />
+
+  <!-- Safe Zone Elements -->
+  <g id="minimal-wallet">
+
+    <!-- 1. Minimal Card Peeking Out -->
+    <g filter="url(#m3-card-shadow)">
+      <rect x="156" y="148" width="200" height="110" rx="20" fill="url(#card-grad)" />
+      <!-- Minimalist Accent Chip / Pill -->
+      <rect x="180" y="168" width="36" height="22" rx="6" fill="#ffffff" opacity="0.3" />
+    </g>
+
+    <!-- 2. Minimal Wallet Body -->
+    <g filter="url(#m3-clean-shadow)">
+      <rect x="116" y="196" width="280" height="170" rx="34" fill="url(#wallet-grad)" />
+    </g>
+
+    <!-- 3. Minimal Flap Strap -->
+    <g filter="url(#m3-flap-shadow)">
+      <!-- Smooth Pill-Flap -->
+      <path d="M 396 242 H 285 C 262.9 242 245 259.9 245 282 C 245 304.1 262.9 322 285 322 H 396 Z" 
+            fill="url(#flap-grad)" />
+
+      <!-- Minimal Accent Dot / Token -->
+      <circle cx="288" cy="282" r="16" fill="url(#clasp-grad)" />
+      <circle cx="288" cy="282" r="6" fill="#ffffff" opacity="0.8" />
+    </g>
+
+  </g>
+</svg>

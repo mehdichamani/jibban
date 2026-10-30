@@ -4,16 +4,34 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Base Wallet / Card Body -->
+
+    <!-- Layer 1: Minimalist Peeking Card -->
+    <path
+        android:fillColor="#3B82F6"
+        android:pathData="M33,31h42c2.8,0 5,2.2 5,5v18H28V36c0,-2.8 2.2,-5 5,-5z" />
+
+    <!-- Card Accent Pill -->
+    <path
+        android:fillColor="#60A5FA"
+        android:pathData="M38,36h8c1.1,0 2,0.9 2,2v2c0,1.1 -0.9,2 -2,2h-8c-1.1,0 -2,-0.9 -2,-2v-2c0,-1.1 0.9,-2 2,-2z" />
+
+    <!-- Layer 2: Clean Minimal Wallet Body -->
     <path
         android:fillColor="#0EA5E9"
-        android:pathData="M28,34h52c3.31,0 6,2.69 6,6v28c0,3.31 -2.69,6 -6,6H28c-3.31,0 -6,-2.69 -6,-6V40c0,-3.31 2.69,-6 6,-6z" />
-    <!-- Wallet Flap -->
+        android:pathData="M24.5,41.5h59c4,0 7.2,3.2 7.2,7.2v21.6c0,4 -3.2,7.2 -7.2,7.2h-59c-4,0 -7.2,-3.2 -7.2,-7.2V48.7c0,-4 3.2,-7.2 7.2,-7.2z" />
+
+    <!-- Layer 3: Minimalist Strap / Flap -->
     <path
         android:fillColor="#8B5CF6"
-        android:pathData="M60,46h24c1.1,0 2,0.9 2,2v16c0,1.1 -0.9,2 -2,2H60c-4.42,0 -8,-3.58 -8,-8s3.58,-8 8,-8z" />
-    <!-- Security / Credit Coin Badge -->
+        android:pathData="M83.5,51H60c-4.7,0 -8.5,3.8 -8.5,8.5s3.8,8.5 8.5,8.5h23.5V51z" />
+
+    <!-- Layer 4: Minimalist Emerald Token Dot -->
     <path
         android:fillColor="#10B981"
-        android:pathData="M62,54m-4,0a4,4 0 1,0 8,0a4,4 0 1,0 -8,0" />
+        android:pathData="M60.5,59.5m-3.5,0a3.5,3.5 0 1,0 7,0a3.5,3.5 0 1,0 -7,0" />
+
+    <!-- Center Dot Highlight -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M60.5,59.5m-1.3,0a1.3,1.3 0 1,0 2.6,0a1.3,1.3 0 1,0 -2.6,0" />
 </vector>

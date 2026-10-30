@@ -10,4 +10,5 @@ dist/
 build/
 .gradle/
 *.apk
+releases/
 .DS_Store
