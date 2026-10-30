@@ -133,82 +133,8 @@ const SEED_ACCOUNTS: Account[] = [
   },
 ];
 
-// لیست اولیه نمونه تراکنش‌ها همراه با حساب‌های مبدا و مقصد
-const SEED_TRANSACTIONS: Transaction[] = [
-  {
-    id: 'tx_seed_1',
-    userId: 'user_default',
-    bankName: 'بلو',
-    accountNumber: '6219',
-    amount: 185000,
-    type: 'debit',
-    fromAccountId: 'acc_blu',
-    fromAccountName: 'بلو بانک',
-    fromAccountColor: '#ef4444',
-    categoryId: 'cat_restaurant',
-    categoryName: 'کافه و رستوران',
-    categoryIcon: '🍔',
-    categoryColor: '#f59e0b',
-    description: 'کافه رستوران نارنج',
-    transactionDate: new Date(Date.now() - 3600000 * 2).toISOString(),
-  },
-  {
-    id: 'tx_seed_2',
-    userId: 'user_default',
-    bankName: 'ملی',
-    accountNumber: '6037',
-    amount: 540000,
-    type: 'debit',
-    fromAccountId: 'acc_melli',
-    fromAccountName: 'بانک ملی - جاری',
-    fromAccountColor: '#3b82f6',
-    categoryId: 'cat_supermarket',
-    categoryName: 'سوپرمارکت و خوراکی',
-    categoryIcon: '🛒',
-    categoryColor: '#10b981',
-    description: 'فروشگاه افق کوروش شعبه ونک',
-    transactionDate: new Date(Date.now() - 3600000 * 20).toISOString(),
-  },
-  {
-    id: 'tx_seed_3',
-    userId: 'user_default',
-    bankName: 'ملت',
-    accountNumber: '6104',
-    amount: 22000000,
-    type: 'credit',
-    fromAccountId: 'acc_employer',
-    fromAccountName: 'کارفرما (حقوق شرکت)',
-    fromAccountColor: '#22c55e',
-    toAccountId: 'acc_melli',
-    toAccountName: 'بانک ملی - جاری',
-    toAccountColor: '#3b82f6',
-    categoryId: 'cat_salary',
-    categoryName: 'حقوق و دستمزد',
-    categoryIcon: '💰',
-    categoryColor: '#22c55e',
-    description: 'واریز حقوق ماهانه',
-    transactionDate: new Date(Date.now() - 3600000 * 48).toISOString(),
-  },
-  {
-    id: 'tx_seed_4',
-    userId: 'user_default',
-    amount: 2000000,
-    type: 'transfer',
-    fromAccountId: 'acc_melli',
-    fromAccountName: 'بانک ملی - جاری',
-    fromAccountColor: '#3b82f6',
-    toAccountId: 'acc_blu',
-    toAccountName: 'بلو بانک',
-    toAccountColor: '#ef4444',
-    categoryId: 'cat_transfer',
-    categoryName: 'انتقال بین حساب‌ها',
-    categoryIcon: '🔄',
-    categoryColor: '#64748b',
-    description: 'کارت به کارت به حساب مخارج روزانه',
-    trackingCode: '98451203',
-    transactionDate: new Date(Date.now() - 3600000 * 60).toISOString(),
-  },
-];
+// لیست اولیه تراکنش‌ها خالی است تا کاربر با محیطی کاملاً تمیز و داده‌های واقعی شروع کند
+const SEED_TRANSACTIONS: Transaction[] = [];
 
 function getLocalAccounts(): Account[] {
   const saved = localStorage.getItem(STORAGE_KEYS.ACCOUNTS);
@@ -226,10 +152,20 @@ function saveLocalAccounts(accs: Account[]): void {
 function getLocalTransactions(): Transaction[] {
   const saved = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
   if (!saved) {
-    localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(SEED_TRANSACTIONS));
-    return SEED_TRANSACTIONS;
+    localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify([]));
+    return [];
   }
-  return JSON.parse(saved);
+  try {
+    const list: Transaction[] = JSON.parse(saved);
+    // پاک‌سازی خودکار هرگونه تراکنش تستی قدیمی (tx_seed_*)
+    const cleanList = list.filter((t) => !t.id?.startsWith('tx_seed_'));
+    if (cleanList.length !== list.length) {
+      localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(cleanList));
+    }
+    return cleanList;
+  } catch {
+    return [];
+  }
 }
 
 function saveLocalTransactions(txs: Transaction[]): void {
@@ -659,5 +595,12 @@ export const api = {
       { id: 'cat_transfer', name: 'انتقال بین حساب‌ها', icon: '🔄', color: '#64748b', type: 'transfer' },
       { id: 'cat_other', name: 'متفرقه', icon: '📦', color: '#94a3b8', type: 'expense' },
     ];
+  },
+
+  /**
+   * پاک‌سازی کامل تمام تراکنش‌ها و شروع با وضعیت تمیز (Clean Slate)
+   */
+  async clearAllTransactions(): Promise<void> {
+    saveLocalTransactions([]);
   },
 };

@@ -94,13 +94,25 @@ export const SettingsTab: React.FC = () => {
     }
   };
 
+  const [clearTxDone, setClearTxDone] = useState<boolean>(false);
+
+  const handleClearTransactions = async () => {
+    if (confirm('آیا از حذف تمام تراکنش‌های ثبت‌شده و تستی اطمینان دارید؟ (حساب‌ها و تنظیمات حفظ خواهند شد)')) {
+      await api.clearAllTransactions();
+      setClearTxDone(true);
+      setTimeout(() => {
+        window.location.reload();
+      }, 700);
+    }
+  };
+
   const handleResetData = () => {
-    if (confirm('آیا از بازنشانی داده‌های محلی و بارگذاری مجدد دیتای نمونه اطمینان دارید؟')) {
+    if (confirm('آیا از بازنشانی کامل و پاک کردن تمام داده‌ها و تنظیمات اطمینان دارید؟')) {
       localStorage.clear();
       setResetDone(true);
       setTimeout(() => {
         window.location.reload();
-      }, 1000);
+      }, 700);
     }
   };
 
@@ -263,25 +275,44 @@ export const SettingsTab: React.FC = () => {
         </div>
       </div>
 
-      {/* بازنشانی داده‌های تست */}
-      <div className="glass-card p-5 flex items-center justify-between gap-4 border-slate-800">
-        <div>
-          <div className="text-sm font-semibold text-slate-300 flex items-center gap-1.5">
-            <Database className="w-4 h-4 text-slate-400" />
-            <span>مدیریت حافظه موقت مرورگر</span>
-          </div>
-          <div className="text-xs text-slate-500 mt-0.5">
-            پاک کردن داده‌های لوکال و بازنشانی به تراکنش‌های پیش‌فرض
-          </div>
+      {/* مدیریت داده‌ها و پاک‌سازی دیتای تستی */}
+      <div className="glass-card p-5 space-y-4 border-slate-800">
+        <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+          <Database className="w-4 h-4 text-sky-400" />
+          <span>مدیریت پایگاه داده و داده‌های اولیه</span>
         </div>
 
-        <button
-          onClick={handleResetData}
-          className="btn btn-secondary text-xs py-2 px-3 text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/30 shrink-0"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          <span>{resetDone ? 'انجام شد' : 'بازنشانی دیتا'}</span>
-        </button>
+        <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-bold text-slate-200">پاک‌سازی تمام تراکنش‌ها (Clean Slate)</div>
+            <div className="text-[11px] text-slate-400 mt-0.5">
+              حذف کلیه تراکنش‌های تستی یا ثبت‌شده و شروع کار با دفتر کل پاک (حساب‌ها باقی می‌مانند)
+            </div>
+          </div>
+          <button
+            onClick={handleClearTransactions}
+            className="btn btn-secondary text-xs py-2 px-3 text-amber-400 hover:bg-amber-500/10 hover:border-amber-500/30 shrink-0"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${clearTxDone ? 'animate-spin' : ''}`} />
+            <span>{clearTxDone ? 'پاک شد' : 'پاک‌سازی تراکنش‌ها'}</span>
+          </button>
+        </div>
+
+        <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-bold text-slate-200">بازنشانی به تنظیمات کارخانه</div>
+            <div className="text-[11px] text-slate-400 mt-0.5">
+              حذف کامل حافظه مرورگر و بازنشانی دسته‌ها و حساب‌ها به وضعیت پیش‌فرض اولیه
+            </div>
+          </div>
+          <button
+            onClick={handleResetData}
+            className="btn btn-secondary text-xs py-2 px-3 text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/30 shrink-0"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${resetDone ? 'animate-spin' : ''}`} />
+            <span>{resetDone ? 'انجام شد' : 'بازنشانی کل دیتا'}</span>
+          </button>
+        </div>
       </div>
     </div>
   );

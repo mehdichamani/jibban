@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Account, Category } from '../types.js';
-import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Check, Calendar, Hash, FileText } from 'lucide-react';
+import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Check, Hash, FileText } from 'lucide-react';
+import { JalaliDatePicker } from './JalaliDatePicker.js';
 
 interface AddTransactionModalProps {
   isOpen: boolean;
@@ -39,8 +40,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [categoryId, setCategoryId] = useState<string>('cat_supermarket');
   const [description, setDescription] = useState<string>('');
   const [trackingCode, setTrackingCode] = useState<string>('');
-  const [transactionDate, setTransactionDate] = useState<string>(
-    new Date().toISOString().slice(0, 16)
+  const [transactionDate, setTransactionDate] = useState<string>(() =>
+    new Date().toISOString()
   );
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
@@ -251,30 +252,22 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             </div>
           </div>
 
-          {/* تاریخ و شرح */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-1">تاریخ و ساعت:</label>
-              <div className="relative">
-                <input
-                  type="datetime-local"
-                  value={transactionDate}
-                  onChange={(e) => setTransactionDate(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-sky-500"
-                />
-              </div>
-            </div>
+          {/* تاریخ شمسی */}
+          <JalaliDatePicker
+            value={transactionDate}
+            onChange={setTransactionDate}
+            label="تاریخ و زمان تراکنش (شمسی):"
+          />
 
-            <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-1">کد پیگیری / ارجاع (اختیاری):</label>
-              <input
-                type="text"
-                value={trackingCode}
-                onChange={(e) => setTrackingCode(e.target.value)}
-                placeholder="مثلاً: ۹۸۴۵۱۲"
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-500 font-mono text-left focus:outline-none focus:border-sky-500"
-              />
-            </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-300 block mb-1">کد پیگیری / ارجاع (اختیاری):</label>
+            <input
+              type="text"
+              value={trackingCode}
+              onChange={(e) => setTrackingCode(e.target.value)}
+              placeholder="مثلاً: ۹۸۴۵۱۲"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-500 font-mono text-left focus:outline-none focus:border-sky-500"
+            />
           </div>
 
           <div>

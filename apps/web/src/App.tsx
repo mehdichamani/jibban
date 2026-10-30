@@ -10,7 +10,8 @@ import { AnalyticsTab } from './components/AnalyticsTab.js';
 import { SettingsTab } from './components/SettingsTab.js';
 import { SmsSimulatorModal } from './components/SmsSimulatorModal.js';
 import { ToSplitModal } from './components/ToSplitModal.js';
-import { AddExpenseModal } from './components/AddExpenseModal.js';
+import { AddExpenseModal, NewGroupExpenseData } from './components/AddExpenseModal.js';
+import { GroupExpenseRecord } from './components/SplitwiseTab.js';
 import { AddTransactionModal } from './components/AddTransactionModal.js';
 import { CheckCircle2 } from 'lucide-react';
 
@@ -130,14 +131,58 @@ export const App: React.FC = () => {
   };
 
   // تبدیل تراکنش به دنگ
-  const handleConfirmSplit = async (tx: Transaction, groupId: string, participants: string[]) => {
+  const handleConfirmSplit = async (
+    tx: Transaction,
+    groupId: string,
+    participants: string[],
+    splits?: Array<{ userId: string; owedAmount: number; percentage?: number }>
+  ) => {
     await api.convertToSplit(tx.id, groupId, participants);
-    showToast(`تراکنش "${tx.description || tx.bankName || 'بانکی'}" با موفقیت بین اعضا تقسیم شد.`);
+
+    const calculatedSplits =
+      splits ||
+      participants.map((p) => ({
+        userId: p,
+        owedAmount: Math.round(tx.amount / participants.length),
+      }));
+
+    const isPercentage = Boolean(splits && splits.some((s) => s.percentage !== undefined));
+
+    const newRecord: GroupExpenseRecord = {
+      id: `exp_tx_${tx.id}`,
+      payerName: 'من',
+      description: tx.description || `خرید ${tx.bankName || 'بانکی'}`,
+      amount: tx.amount,
+      date: tx.transactionDate,
+      splitType: isPercentage ? 'percentage' : 'equal',
+      splits: calculatedSplits,
+    };
+
+    const saved = localStorage.getItem('jibban_local_group_expenses');
+    const list: GroupExpenseRecord[] = saved ? JSON.parse(saved) : [];
+    localStorage.setItem('jibban_local_group_expenses', JSON.stringify([newRecord, ...list]));
+
+    showToast(`تراکنش "${tx.description || tx.bankName || 'بانکی'}" با موفقیت در گروه دنگ ثبت شد.`);
   };
 
   // ثبت هزینه جدید گروهی
-  const handleAddGroupExpense = (data: { description: string; amount: number; payerName: string }) => {
-    showToast(`هزینه "${data.description}" به مبلغ ${new Intl.NumberFormat('fa-IR').format(data.amount)} ت ثبت شد.`);
+  const handleAddGroupExpense = (data: NewGroupExpenseData) => {
+    const newRecord: GroupExpenseRecord = {
+      id: `exp_${Date.now()}`,
+      payerName: data.payerName,
+      description: data.description,
+      amount: data.amount,
+      date: new Date().toISOString(),
+      splitType: data.splitType,
+      splits: data.splits,
+    };
+
+    const saved = localStorage.getItem('jibban_local_group_expenses');
+    const list: GroupExpenseRecord[] = saved ? JSON.parse(saved) : [];
+    localStorage.setItem('jibban_local_group_expenses', JSON.stringify([newRecord, ...list]));
+
+    const splitLabel = data.splitType === 'percentage' ? 'درصدی' : 'مساوی';
+    showToast(`هزینه "${data.description}" به مبلغ ${new Intl.NumberFormat('fa-IR').format(data.amount)} ت (${splitLabel}) ثبت شد.`);
   };
 
   return (
