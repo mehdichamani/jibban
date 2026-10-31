@@ -196,7 +196,7 @@ export function identifyBank(text: string): BankRule | undefined {
 
   // ابتدا بانک‌های با نام بلندتر و مشخص‌تر بررسی می‌شوند تا تداخل نام پیش نیاید
   const sortedBanks = [...IRANIAN_BANKS].sort(
-    (a, b) => Math.max(...b.aliases.map((al) => al.length)) - Math.max(...a.aliases.map((al) => al.length))
+    (a, b) => Math.max(...b.aliases.map((al: string) => al.length)) - Math.max(...a.aliases.map((al: string) => al.length))
   );
 
   for (const bank of sortedBanks) {

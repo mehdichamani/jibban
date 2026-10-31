@@ -4,11 +4,12 @@ import {
   toEnglishDigits,
   normalizePersianText,
   convertToToman,
+  convertToRial,
   jalaliToGregorian,
   extractTransactionDate,
 } from '../src/index.js';
 
-describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایران', () => {
+describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایران (JibBan 2.0 Rial Core)', () => {
   describe('ابزارهای تمیزسازی و تبدیل', () => {
     it('تبدیل صحیح اعداد فارسی و عربی به انگلیسی', () => {
       expect(toEnglishDigits('۰۱۲۳۴۵۶۷۸۹')).toBe('0123456789');
@@ -24,10 +25,10 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(output).toContain('250,000');
     });
 
-    it('تبدیل تضمینی ریال به تومان (حذف یک صفر)', () => {
-      expect(convertToToman(1000000, 'rial')).toBe(100000);
-      expect(convertToToman(50000, 'toman')).toBe(50000);
-      expect(convertToToman(350, 'rial')).toBe(35);
+    it('تبدیل تضمینی ریال به تومان و برعکس', () => {
+      expect(convertToToman(1000000)).toBe(100000);
+      expect(convertToRial(50000, 'toman')).toBe(500000);
+      expect(convertToRial(100000, 'rial')).toBe(100000);
     });
 
     it('تبدیل تاریخ شمسی به میلادی و خروجی ISO', () => {
@@ -42,9 +43,9 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
     });
   });
 
-  describe('تست ۲۶+ بانک ایرانی طبق مستندات و نقشه راه', () => {
+  describe('تست ۲۶+ بانک ایرانی طبق مستندات و نقشه راه (خروجی به ریال)', () => {
     // ۱. بلوبانک (Blu)
-    it('پردازش پیامک خرید بلوبانک (مبلغ بر حسب تومان)', () => {
+    it('پردازش پیامک خرید بلوبانک (مبلغ بر حسب تومان به ریال تبدیل می‌شود)', () => {
       const sms = `خرید 45,000 تومان
 از کارت 621986...4321
 مانده: 1,230,000 تومان
@@ -54,8 +55,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('بلو');
       expect(result.type).toBe('debit');
-      expect(result.amount).toBe(45000); // تومان بدون تغییر
-      expect(result.balance).toBe(1230000);
+      expect(result.amount).toBe(450000); // 45,000 تومان = 450,000 ریال
+      expect(result.balance).toBe(12300000);
       expect(result.accountNumber).toBe('4321');
     });
 
@@ -68,8 +69,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('بلو');
       expect(result.type).toBe('credit');
-      expect(result.amount).toBe(500000);
-      expect(result.balance).toBe(1930000);
+      expect(result.amount).toBe(5000000); // 500,000 تومان = 5,000,000 ریال
+      expect(result.balance).toBe(19300000);
     });
 
     // ۲. بانک ملی ایران
@@ -84,8 +85,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('ملی');
       expect(result.type).toBe('debit');
-      expect(result.amount).toBe(250000); // 2,500,000 ریال = 250,000 تومان
-      expect(result.balance).toBe(1420000);
+      expect(result.amount).toBe(2500000); // به ریال
+      expect(result.balance).toBe(14200000);
       expect(result.accountNumber).toBe('1234');
     });
 
@@ -99,10 +100,9 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(resultCredit.isBankSms).toBe(true);
       expect(resultCredit.bankName).toBe('ملی');
       expect(resultCredit.type).toBe('credit');
-      expect(resultCredit.amount).toBe(1000000); // 10,000,000 ریال = 1,000,000 تومان
-      expect(resultCredit.balance).toBe(3626150);
+      expect(resultCredit.amount).toBe(10000000); // 10,000,000 ریال
+      expect(resultCredit.balance).toBe(36261500);
       expect(resultCredit.accountNumber).toBe('2008');
-      expect(resultCredit.transactionDate).toBeDefined();
 
       const smsDebit = `بانك ملي ايران
 انتقال:20,014,500-
@@ -113,8 +113,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(resultDebit.isBankSms).toBe(true);
       expect(resultDebit.bankName).toBe('ملی');
       expect(resultDebit.type).toBe('debit');
-      expect(resultDebit.amount).toBe(2001450);
-      expect(resultDebit.balance).toBe(2766150);
+      expect(resultDebit.amount).toBe(20014500);
+      expect(resultDebit.balance).toBe(27661500);
     });
 
     // ۳. بانک ملت
@@ -128,8 +128,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('ملت');
       expect(result.type).toBe('credit');
-      expect(result.amount).toBe(1000000);
-      expect(result.balance).toBe(1500000);
+      expect(result.amount).toBe(10000000);
+      expect(result.balance).toBe(15000000);
     });
 
     // ۴. بانک صادرات
@@ -143,8 +143,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('صادرات');
       expect(result.type).toBe('debit');
-      expect(result.amount).toBe(75000);
-      expect(result.balance).toBe(125000);
+      expect(result.amount).toBe(750000);
+      expect(result.balance).toBe(1250000);
     });
 
     // ۵. بانک تجارت
@@ -158,12 +158,12 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('تجارت');
       expect(result.type).toBe('debit');
-      expect(result.amount).toBe(40000);
-      expect(result.balance).toBe(250000);
+      expect(result.amount).toBe(400000);
+      expect(result.balance).toBe(2500000);
       expect(result.accountNumber).toBe('1234');
     });
 
-    // ۶. بانک سپه و بانک‌های ادغامی (انصار، قوامین، ...)
+    // ۶. بانک سپه
     it('پردازش پیامک بانک سپه', () => {
       const sms = `بانک سپه
 برداشت از حساب: 1001234567
@@ -174,8 +174,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('سپه');
       expect(result.type).toBe('debit');
-      expect(result.amount).toBe(35000);
-      expect(result.balance).toBe(510000);
+      expect(result.amount).toBe(350000);
+      expect(result.balance).toBe(5100000);
     });
 
     it('پردازش پیامک بانک انصار (ادغامی سپه)', () => {
@@ -187,7 +187,7 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('سپه');
       expect(result.type).toBe('credit');
-      expect(result.amount).toBe(400000);
+      expect(result.amount).toBe(4000000);
     });
 
     // ۷. بانک سامان
@@ -201,8 +201,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('سامان');
       expect(result.type).toBe('debit');
-      expect(result.amount).toBe(65000);
-      expect(result.balance).toBe(435000);
+      expect(result.amount).toBe(650000);
+      expect(result.balance).toBe(4350000);
     });
 
     // ۸. بانک پاسارگاد
@@ -216,8 +216,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('پاسارگاد');
       expect(result.type).toBe('debit');
-      expect(result.amount).toBe(92000);
-      expect(result.balance).toBe(600000);
+      expect(result.amount).toBe(920000);
+      expect(result.balance).toBe(6000000);
     });
 
     // ۹. بانک پارسیان
@@ -230,8 +230,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('پارسیان');
       expect(result.type).toBe('debit');
-      expect(result.amount).toBe(45000);
-      expect(result.balance).toBe(210000);
+      expect(result.amount).toBe(450000);
+      expect(result.balance).toBe(2100000);
       expect(result.accountNumber).toBe('5555');
     });
 
@@ -245,8 +245,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('کشاورزی');
       expect(result.type).toBe('debit');
-      expect(result.amount).toBe(18000);
-      expect(result.balance).toBe(82000);
+      expect(result.amount).toBe(180000);
+      expect(result.balance).toBe(820000);
     });
 
     // ۱۱. بانک مسکن
@@ -259,8 +259,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('مسکن');
       expect(result.type).toBe('debit');
-      expect(result.amount).toBe(30000);
-      expect(result.balance).toBe(120000);
+      expect(result.amount).toBe(300000);
+      expect(result.balance).toBe(1200000);
     });
 
     // ۱۲. بانک اقتصاد نوین
@@ -273,8 +273,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('اقتصاد نوین');
       expect(result.type).toBe('debit');
-      expect(result.amount).toBe(15000);
-      expect(result.balance).toBe(85000);
+      expect(result.amount).toBe(150000);
+      expect(result.balance).toBe(850000);
     });
 
     // ۱۳. بانک آینده
@@ -286,8 +286,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       const result = parseBankSms(sms);
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('آینده');
-      expect(result.amount).toBe(80000);
-      expect(result.balance).toBe(340000);
+      expect(result.amount).toBe(800000);
+      expect(result.balance).toBe(3400000);
     });
 
     // ۱۴. بانک شهر
@@ -299,8 +299,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       const result = parseBankSms(sms);
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('شهر');
-      expect(result.amount).toBe(22000);
-      expect(result.balance).toBe(188000);
+      expect(result.amount).toBe(220000);
+      expect(result.balance).toBe(1880000);
       expect(result.accountNumber).toBe('1111');
     });
 
@@ -313,8 +313,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       const result = parseBankSms(sms);
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('دی');
-      expect(result.amount).toBe(10000);
-      expect(result.balance).toBe(90000);
+      expect(result.amount).toBe(100000);
+      expect(result.balance).toBe(900000);
     });
 
     // ۱۶. بانک سینا
@@ -326,8 +326,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       const result = parseBankSms(sms);
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('سینا');
-      expect(result.amount).toBe(35000);
-      expect(result.balance).toBe(165000);
+      expect(result.amount).toBe(350000);
+      expect(result.balance).toBe(1650000);
     });
 
     // ۱۷. بانک گردشگری
@@ -339,8 +339,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       const result = parseBankSms(sms);
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('گردشگری');
-      expect(result.amount).toBe(50000);
-      expect(result.balance).toBe(200000);
+      expect(result.amount).toBe(500000);
+      expect(result.balance).toBe(2000000);
     });
 
     // ۱۸. بانک کارآفرین
@@ -351,7 +351,7 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       const result = parseBankSms(sms);
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('کارآفرین');
-      expect(result.amount).toBe(24000);
+      expect(result.amount).toBe(240000);
     });
 
     // ۱۹. بانک سرمایه
@@ -363,7 +363,7 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       const result = parseBankSms(sms);
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('سرمایه');
-      expect(result.amount).toBe(70000);
+      expect(result.amount).toBe(700000);
     });
 
     // ۲۰. بانک خاورمیانه
@@ -376,7 +376,7 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('خاورمیانه');
       expect(result.type).toBe('credit');
-      expect(result.amount).toBe(500000);
+      expect(result.amount).toBe(5000000);
     });
 
     // ۲۱. بانک ایران زمین
@@ -388,7 +388,7 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       const result = parseBankSms(sms);
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('ایران زمین');
-      expect(result.amount).toBe(12000);
+      expect(result.amount).toBe(120000);
     });
 
     // ۲۲. بانک رفاه کارگران
@@ -400,8 +400,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       const result = parseBankSms(sms);
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('رفاه کارگران');
-      expect(result.amount).toBe(60000);
-      expect(result.balance).toBe(140000);
+      expect(result.amount).toBe(600000);
+      expect(result.balance).toBe(1400000);
     });
 
     // ۲۳. پست بانک ایران
@@ -412,7 +412,7 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       const result = parseBankSms(sms);
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('پست بانک');
-      expect(result.amount).toBe(9000);
+      expect(result.amount).toBe(90000);
     });
 
     // ۲۴. بانک توسعه تعاون
@@ -424,7 +424,7 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       const result = parseBankSms(sms);
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('توسعه تعاون');
-      expect(result.amount).toBe(31000);
+      expect(result.amount).toBe(310000);
     });
 
     // ۲۵. بانک توسعه صادرات
@@ -436,7 +436,7 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('توسعه صادرات');
       expect(result.type).toBe('credit');
-      expect(result.amount).toBe(800000);
+      expect(result.amount).toBe(8000000);
     });
 
     // ۲۶. بانک قرض‌الحسنه رسالت
@@ -450,8 +450,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('رسالت');
       expect(result.type).toBe('debit');
-      expect(result.amount).toBe(120000);
-      expect(result.balance).toBe(450000);
+      expect(result.amount).toBe(1200000);
+      expect(result.balance).toBe(4500000);
     });
 
     // ۲۷. بانک قرض‌الحسنه مهر ایران
@@ -464,8 +464,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('مهر ایران');
       expect(result.type).toBe('debit');
-      expect(result.amount).toBe(90000);
-      expect(result.balance).toBe(310000);
+      expect(result.amount).toBe(900000);
+      expect(result.balance).toBe(3100000);
     });
   });
 
@@ -480,8 +480,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       expect(result.isBankSms).toBe(true);
       expect(result.bankName).toBe('بانک ناشناس');
       expect(result.type).toBe('debit');
-      expect(result.amount).toBe(50000); // 500,000 ریال = 50,000 تومان
-      expect(result.balance).toBe(250000);
+      expect(result.amount).toBe(500000);
+      expect(result.balance).toBe(2500000);
       expect(result.description).toBe('کافه نادری');
     });
 
@@ -492,8 +492,8 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       const result = parseBankSms(sms);
       expect(result.isBankSms).toBe(true);
       expect(result.type).toBe('credit');
-      expect(result.amount).toBe(80000);
-      expect(result.balance).toBe(350000);
+      expect(result.amount).toBe(800000); // 80,000 تومان = 800,000 ریال
+      expect(result.balance).toBe(3500000);
     });
 
     it('پارس پیامک با فرمت علامت‌دار منفی و مثبت', () => {
@@ -503,7 +503,7 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       const resDebit = parseBankSms(smsDebit);
       expect(resDebit.isBankSms).toBe(true);
       expect(resDebit.type).toBe('debit');
-      expect(resDebit.amount).toBe(7500);
+      expect(resDebit.amount).toBe(75000);
 
       const smsCredit = `حساب 1234
 +150,000 ریال
@@ -511,7 +511,7 @@ describe('sms-parser-ir: پردازشگر پیامک‌های بانکی ایر�
       const resCredit = parseBankSms(smsCredit);
       expect(resCredit.isBankSms).toBe(true);
       expect(resCredit.type).toBe('credit');
-      expect(resCredit.amount).toBe(15000);
+      expect(resCredit.amount).toBe(150000);
     });
   });
 

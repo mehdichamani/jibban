@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { Bindings, Variables } from '../types.js';
+import { Bindings, Variables, Account } from '../types.js';
 
 export const accountsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
@@ -9,66 +9,57 @@ export const accountsRouter = new Hono<{ Bindings: Bindings; Variables: Variable
 accountsRouter.get('/', async (c) => {
   const userId = c.get('userId');
   const type = c.req.query('type');
-  const isSource = c.req.query('isSource');
-  const isDestination = c.req.query('isDestination');
+  const includeArchived = c.req.query('includeArchived') === 'true';
 
   let query = `
     SELECT 
       id, user_id as userId, name, type, bank_name as bankName,
       account_number as accountNumber, card_number as cardNumber,
-      color, icon, balance, initial_balance as initialBalance,
-      is_source as isSource, is_destination as isDestination,
+      sheba, color, icon, balance, initial_balance as initialBalance,
       is_archived as isArchived, created_at as createdAt
     FROM accounts
-    WHERE user_id = ? AND is_archived = 0
+    WHERE user_id = ?
   `;
   const params: unknown[] = [userId];
+
+  if (!includeArchived) {
+    query += ` AND is_archived = 0`;
+  }
 
   if (type) {
     query += ` AND type = ?`;
     params.push(type);
   }
-  if (isSource !== undefined) {
-    query += ` AND is_source = ?`;
-    params.push(isSource === 'true' || isSource === '1' ? 1 : 0);
-  }
-  if (isDestination !== undefined) {
-    query += ` AND is_destination = ?`;
-    params.push(isDestination === 'true' || isDestination === '1' ? 1 : 0);
-  }
 
-  query += ` ORDER BY type ASC, name ASC`;
+  query += ` ORDER BY is_archived ASC, type ASC, name ASC`;
 
   const { results } = await c.env.DB.prepare(query).bind(...params).all();
 
   return c.json({
     success: true,
-    data: results.map((row: any) => ({
+    data: (results || []).map((row: any) => ({
       ...row,
-      isSource: Boolean(row.isSource),
-      isDestination: Boolean(row.isDestination),
       isArchived: Boolean(row.isArchived),
     })),
   });
 });
 
 /**
- * ایجاد حساب مالی جدید
+ * ایجاد حساب مالی جدید (مبالغ به ریال)
  */
 accountsRouter.post('/', async (c) => {
   const userId = c.get('userId');
   const body = await c.req.json<{
     name: string;
-    type?: 'bank' | 'wallet' | 'savings' | 'credit' | 'counterparty';
+    type?: 'bank' | 'wallet' | 'savings' | 'credit' | 'debt';
     bankName?: string;
     accountNumber?: string;
     cardNumber?: string;
+    sheba?: string;
     color?: string;
     icon?: string;
     balance?: number;
     initialBalance?: number;
-    isSource?: boolean;
-    isDestination?: boolean;
   }>();
 
   if (!body.name || !body.name.trim()) {
@@ -76,19 +67,17 @@ accountsRouter.post('/', async (c) => {
   }
 
   const id = `acc_${crypto.randomUUID()}`;
-  const initialBalance = body.initialBalance ?? body.balance ?? 0;
-  const balance = body.balance ?? initialBalance;
+  const initialBalance = Math.round(body.initialBalance ?? body.balance ?? 0);
+  const balance = Math.round(body.balance ?? initialBalance);
   const type = body.type || 'bank';
   const color = body.color || '#0284c7';
   const icon = body.icon || (type === 'wallet' ? 'wallet' : type === 'savings' ? 'piggy-bank' : 'credit-card');
-  const isSource = body.isSource !== false ? 1 : 0;
-  const isDestination = body.isDestination !== false ? 1 : 0;
 
   await c.env.DB.prepare(
     `INSERT INTO accounts (
-      id, user_id, name, type, bank_name, account_number, card_number,
-      color, icon, balance, initial_balance, is_source, is_destination
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      id, user_id, name, type, bank_name, account_number, card_number, sheba,
+      color, icon, balance, initial_balance
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       id,
@@ -98,12 +87,11 @@ accountsRouter.post('/', async (c) => {
       body.bankName ?? null,
       body.accountNumber ?? null,
       body.cardNumber ?? null,
+      body.sheba ?? null,
       color,
       icon,
       balance,
-      initialBalance,
-      isSource,
-      isDestination
+      initialBalance
     )
     .run();
 
@@ -118,12 +106,11 @@ accountsRouter.post('/', async (c) => {
         bankName: body.bankName,
         accountNumber: body.accountNumber,
         cardNumber: body.cardNumber,
+        sheba: body.sheba,
         color,
         icon,
         balance,
         initialBalance,
-        isSource: Boolean(isSource),
-        isDestination: Boolean(isDestination),
       },
     },
     201
@@ -140,9 +127,8 @@ accountsRouter.get('/:id', async (c) => {
   const acc = await c.env.DB.prepare(
     `SELECT 
       id, user_id as userId, name, type, bank_name as bankName,
-      account_number as accountNumber, card_number as cardNumber,
+      account_number as accountNumber, card_number as cardNumber, sheba,
       color, icon, balance, initial_balance as initialBalance,
-      is_source as isSource, is_destination as isDestination,
       is_archived as isArchived, created_at as createdAt
     FROM accounts WHERE id = ? AND user_id = ?`
   )
@@ -173,10 +159,8 @@ accountsRouter.get('/:id', async (c) => {
     success: true,
     data: {
       ...acc,
-      isSource: Boolean(acc.isSource),
-      isDestination: Boolean(acc.isDestination),
       isArchived: Boolean(acc.isArchived),
-      recentTransactions: recentTxs,
+      recentTransactions: recentTxs || [],
     },
   });
 });
@@ -189,16 +173,15 @@ accountsRouter.patch('/:id', async (c) => {
   const userId = c.get('userId');
   const body = await c.req.json<{
     name?: string;
-    type?: 'bank' | 'wallet' | 'savings' | 'credit' | 'counterparty';
+    type?: 'bank' | 'wallet' | 'savings' | 'credit' | 'debt';
     bankName?: string;
     accountNumber?: string;
     cardNumber?: string;
+    sheba?: string;
     color?: string;
     icon?: string;
     balance?: number;
     initialBalance?: number;
-    isSource?: boolean;
-    isDestination?: boolean;
     isArchived?: boolean;
   }>();
 
@@ -225,6 +208,10 @@ accountsRouter.patch('/:id', async (c) => {
     updates.push('card_number = ?');
     params.push(body.cardNumber);
   }
+  if (body.sheba !== undefined) {
+    updates.push('sheba = ?');
+    params.push(body.sheba);
+  }
   if (body.color !== undefined) {
     updates.push('color = ?');
     params.push(body.color);
@@ -235,19 +222,11 @@ accountsRouter.patch('/:id', async (c) => {
   }
   if (body.balance !== undefined) {
     updates.push('balance = ?');
-    params.push(body.balance);
+    params.push(Math.round(body.balance));
   }
   if (body.initialBalance !== undefined) {
     updates.push('initial_balance = ?');
-    params.push(body.initialBalance);
-  }
-  if (body.isSource !== undefined) {
-    updates.push('is_source = ?');
-    params.push(body.isSource ? 1 : 0);
-  }
-  if (body.isDestination !== undefined) {
-    updates.push('is_destination = ?');
-    params.push(body.isDestination ? 1 : 0);
+    params.push(Math.round(body.initialBalance));
   }
   if (body.isArchived !== undefined) {
     updates.push('is_archived = ?');
@@ -284,7 +263,6 @@ accountsRouter.delete('/:id', async (c) => {
     .first<{ count: number }>();
 
   if (txCount && txCount.count > 0) {
-    // برای جلوگیری از شکستن تاریخچه حسابداری، حساب آرشیو می‌شود
     await c.env.DB.prepare('UPDATE accounts SET is_archived = 1 WHERE id = ? AND user_id = ?')
       .bind(id, userId)
       .run();

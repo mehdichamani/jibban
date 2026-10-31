@@ -25,18 +25,14 @@ export function normalizePersianText(text: string): string {
   if (!text) return '';
 
   return toEnglishDigits(text)
-    // تبدیل حروف عربی ک و ی به معادل فارسی
     .replace(/ي/g, 'ی')
     .replace(/ك/g, 'ک')
     .replace(/ة/g, 'ه')
-    // یکپارچه‌سازی فاصله‌های مجازی و غیرمجاز
     .replace(/\u200c/g, ' ')
     .replace(/\u00a0/g, ' ')
-    // حذف علائم نگارشی اضافی بدون تغییر ساختار خطوط
     .replace(/[\u200E\u200F]/g, '')
-    // نرمال‌سازی ویرگول‌های فارسی و انگلیسی
     .replace(/،/g, ',')
-    // حذف فاصله‌های متوالی در یک خط
+    .replace(/\r\n/g, '\n')
     .replace(/[ \t]+/g, ' ')
     .trim();
 }
@@ -46,14 +42,13 @@ export function normalizePersianText(text: string): string {
  */
 export function parseNumber(amountStr: string): number {
   if (!amountStr) return 0;
-  // حذف تمامی کاراکترهای غیر از رقم و علامت منفی
   const cleaned = amountStr.replace(/[^0-9-]/g, '');
   const num = parseInt(cleaned, 10);
   return isNaN(num) ? 0 : Math.abs(num);
 }
 
 /**
- * تشخیص واحد پولی در مجاورت مبلغ
+ * تشخیص واحد پولی در متن
  */
 export function detectCurrency(
   snippet: string,
@@ -69,16 +64,23 @@ export function detectCurrency(
 }
 
 /**
- * تبدیل تضمینی مبلغ به تومان
- * هر ۱۰ ریال = ۱ تومان
+ * تبدیل تضمینی مبلغ به ریال (واحد رسمی دیتابیس)
  */
-export function convertToToman(
+export function convertToRial(
   amount: number,
   currency: 'rial' | 'toman' = 'rial'
 ): number {
-  if (currency === 'rial') {
-    // در سیستم بانکی ایران مبالغ ریالی همواره مضرب ۱۰ هستند
-    return Math.floor(amount / 10);
+  if (currency === 'toman') {
+    return Math.round(amount * 10);
   }
-  return amount;
+  return Math.round(amount);
+}
+
+/**
+ * تبدیل مبلغ ریال به تومان (جهت نمایش فرانت‌اند)
+ */
+export function convertToToman(
+  amountInRials: number
+): number {
+  return amountInRials / 10;
 }

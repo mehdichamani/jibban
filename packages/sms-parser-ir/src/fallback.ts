@@ -3,7 +3,7 @@ import {
   normalizePersianText,
   parseNumber,
   detectCurrency,
-  convertToToman,
+  convertToRial,
 } from './utils/cleaner.js';
 import { extractTransactionDate } from './utils/date.js';
 
@@ -49,7 +49,7 @@ export function isLikelyBankSms(text: string): boolean {
     return false;
   }
 
-  // پیامک‌های صورتحساب، قبض و بسته‌های اپراتورها (همراه اول، ایرانسل، مخابرات و...) تراکنش بانکی نیستند
+  // پیامک‌های صورتحساب، قبض و بسته‌های اپراتورها
   if (/همراه اول|همراه‌اول|ایرانسل|رایتل|مخابرات/i.test(text)) {
     if (/صورت[‌\s]*حساب|بدهی پیشین|مهلت پرداخت|پرداخت شما به مبلغ.*دریافت شد|بسته اینترنت|شارژ سیم[‌\s]*کارت|ش ق:|ش پ:/i.test(text)) {
       return false;
@@ -71,7 +71,6 @@ export function isLikelyBankSms(text: string): boolean {
  * تشخیص نوع تراکنش (برداشت یا واریز)
  */
 export function detectTransactionType(text: string): TransactionType {
-  // بررسی علامت‌های مثبت و منفی متداول در پیامک‌ها
   if (/[+]\s*[\d,]{3,}|[\d,]{3,}\s*[+]/.test(text)) {
     return 'credit';
   }
@@ -93,13 +92,12 @@ export function detectTransactionType(text: string): TransactionType {
 }
 
 /**
- * استخراج مانده یا موجودی حساب
+ * استخراج مانده یا موجودی حساب (همیشه به ریال)
  */
 export function extractBalance(
   text: string,
   defaultCurrency: 'rial' | 'toman' = 'rial'
 ): number | undefined {
-  // الگوهایی مثل: مانده: 1,200,000 ریال یا موجودی 50000 تومان یا مانده حساب: ...
   const balanceRegex =
     /(?:مانده(?:\s*حساب|\s*کل|\s*فعلی)?|موجودی(?:\s*حساب|\s*جدید|\s*قابل\s*برداشت)?)\s*[:=]?\s*([+-]?\s*[\d,]+)\s*(ریال|تومان|تومن|IRR)?/i;
 
@@ -113,11 +111,11 @@ export function extractBalance(
     ? detectCurrency(match[2], defaultCurrency)
     : detectCurrency(text, defaultCurrency);
 
-  return convertToToman(rawNumber, currencyUnit);
+  return convertToRial(rawNumber, currencyUnit);
 }
 
 /**
- * استخراج مبلغ تراکنش
+ * استخراج مبلغ تراکنش (همیشه به ریال)
  */
 export function extractAmount(
   text: string,
@@ -134,7 +132,7 @@ export function extractAmount(
       const currency = explicitMatch[2]
         ? detectCurrency(explicitMatch[2], defaultCurrency)
         : detectCurrency(text, defaultCurrency);
-      return convertToToman(rawNumber, currency);
+      return convertToRial(rawNumber, currency);
     }
   }
 
@@ -144,24 +142,23 @@ export function extractAmount(
   for (const m of currencyMatches) {
     const precedingIndex = Math.max(0, (m.index ?? 0) - 15);
     const contextBefore = text.slice(precedingIndex, m.index);
-    // اگر مربوط به مانده یا موجودی نبود، مبلغ تراکنش است
     if (!/مانده|موجودی/.test(contextBefore)) {
       const rawNumber = parseNumber(m[1]);
       if (rawNumber > 0) {
         const currency = detectCurrency(m[2], defaultCurrency);
-        return convertToToman(rawNumber, currency);
+        return convertToRial(rawNumber, currency);
       }
     }
   }
 
-  // ۳. الگو با علامت‌های منفی و مثبت در همان خط (شامل دونقطه و فواصل)
+  // ۳. الگو با علامت‌های منفی و مثبت در همان خط
   const signedAmountRegex = /(?:^|[ \t\n:：])([+-][ \t]*[\d,]{3,}|[\d,]{3,}[ \t]*[+-])(?=[ \t\r\n]|$)/m;
   const signedMatch = text.match(signedAmountRegex);
   if (signedMatch) {
     const rawNumber = parseNumber(signedMatch[1]);
     if (rawNumber > 0) {
       const currency = detectCurrency(text, defaultCurrency);
-      return convertToToman(rawNumber, currency);
+      return convertToRial(rawNumber, currency);
     }
   }
 
@@ -172,19 +169,16 @@ export function extractAmount(
  * استخراج ۴ رقم آخر کارت یا شماره حساب
  */
 export function extractAccountNumber(text: string): string | undefined {
-  // ۱. الگوهای کارت: کارت 6037...1234 یا کارت: *1234 یا کارت 1234
   const cardMatch = text.match(/کارت\s*[:=]?\s*(?:[0-9]{4,6}[.*]+)?([0-9]{4})\b/i);
   if (cardMatch) {
     return cardMatch[1];
   }
 
-  // ۲. الگوهای کارت با نقاط یا ستاره: مثلاً ...5678 یا *5678
   const maskedCardMatch = text.match(/(?:[.]{2,}|\*{2,})([0-9]{4})\b/);
   if (maskedCardMatch) {
     return maskedCardMatch[1];
   }
 
-  // ۳. الگوهای حساب: حساب: 12345678 یا از حساب 010...
   const accountMatch = text.match(/(?:از\s*|به\s*)?حساب\s*[:=]?\s*([0-9.-]+)/i);
   if (accountMatch) {
     const cleanedAcc = accountMatch[1].replace(/[^0-9]/g, '');
@@ -205,7 +199,6 @@ export function extractDescription(text: string): string | undefined {
   const match = text.match(descRegex);
   if (match) {
     const desc = match[1].trim();
-    // حذف موارد نامعتبر یا کوتاه
     if (desc.length > 2 && !/^\d+$/.test(desc)) {
       return desc;
     }
@@ -215,7 +208,7 @@ export function extractDescription(text: string): string | undefined {
 
 /**
  * موتور فال‌بک عمومی (Generic Fallback Engine)
- * زمانی که پیامک الگوی اختصاصی ندارد یا از بانکی ناشناس است
+ * خروجی مبالغ همگی به ریال
  */
 export function parseWithFallback(
   rawText: string,
@@ -241,7 +234,6 @@ export function parseWithFallback(
   const transactionDate = extractTransactionDate(cleaned);
   const description = extractDescription(cleaned);
 
-  // اگر مبلغ معتبری پیدا نشد، پیامک تراکنش تلقی نمی‌شود
   if (amount <= 0) {
     return {
       isBankSms: false,

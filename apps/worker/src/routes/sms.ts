@@ -16,21 +16,20 @@ export async function computeSmsHash(rawSms: string): Promise<string> {
 }
 
 /**
- * حدس هوشمند دسته‌بندی هزینه بر اساس توضیحات یا نوع تراکنش
+ * حدس هوشمند سرفصل هزینه
  */
 function autoDetectCategory(description?: string, type?: 'debit' | 'credit'): string {
   if (type === 'credit') {
     return 'cat_salary';
   }
-
-  if (!description) return 'cat_other';
+  if (!description) return 'cat_other_exp';
   const desc = description.toLowerCase();
 
   if (/فروشگاه|هایپر|کوروش|جانبو|سوپر|پروتئین|میوه|نان|نانوایی/.test(desc)) {
     return 'cat_supermarket';
   }
   if (/اسنپ|تپسی|بنزین|جایگاه|سوخت|تاکسی|کرایه|مترو/.test(desc)) {
-    return 'cat_transport';
+    return 'cat_taxi';
   }
   if (/رستوران|کافه|پیتزا|فست فود|فستفود|ساندویچ|کباب|چلو/.test(desc)) {
     return 'cat_restaurant';
@@ -45,17 +44,17 @@ function autoDetectCategory(description?: string, type?: 'debit' | 'credit'): st
     return 'cat_health';
   }
   if (/قسط|وام|تسهیلات|چک/.test(desc)) {
-    return 'cat_installment';
+    return 'cat_loan_pay';
   }
   if (/اجاره|رهن|پول پیش/.test(desc)) {
-    return 'cat_housing';
+    return 'cat_rent';
   }
 
-  return 'cat_other';
+  return 'cat_other_exp';
 }
 
 /**
- * دریافت گزارش پیامک‌های خام ثبت شده و وضعیت آن‌ها
+ * دریافت لاگ پیامک‌های خام
  */
 smsRouter.get('/logs', async (c) => {
   const userId = c.get('userId');
@@ -63,17 +62,16 @@ smsRouter.get('/logs', async (c) => {
   const offset = parseInt(c.req.query('offset') || '0', 10);
 
   const { results } = await c.env.DB.prepare(
-    `SELECT * FROM raw_sms WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`
+    `SELECT * FROM raw_sms WHERE user_id = ? ORDER BY received_at DESC LIMIT ? OFFSET ?`
   )
     .bind(userId, limit, offset)
     .all();
 
-  return c.json({ success: true, data: results });
+  return c.json({ success: true, data: results || [] });
 });
 
 /**
- * دریافت متن پیامک از اپ اندروید، استخراج پارامترها و ذخیره در پایگاه داده حسابداری
- * همراه با اتصال خودکار به حساب مبدا یا مقصد و همگام‌سازی موجودی
+ * دریافت و پردازش پیامک خام بانکی از اندروید یا وب
  */
 smsRouter.post('/ingest', async (c) => {
   const body = await c.req.json<{
@@ -88,7 +86,6 @@ smsRouter.post('/ingest', async (c) => {
     return c.json({ success: false, error: 'متن پیامک معتبر نیست' }, 400);
   }
 
-  // ۱. اعتبارسنجی کاربر
   let userId = c.get('userId');
   if (body.syncToken) {
     const user = await c.env.DB.prepare('SELECT id FROM users WHERE sync_token = ?')
@@ -99,81 +96,60 @@ smsRouter.post('/ingest', async (c) => {
     }
   }
 
-  // ۲. محاسبه هش یکتای پیامک
   const smsHash = await computeSmsHash(rawSms);
   const receivedAt = body.timestamp
     ? new Date(body.timestamp).toISOString()
     : new Date().toISOString();
 
-  // ۳. بررسی دیتابیس پیامک‌های قبلی (Deduplication & Deleted Retention)
+  // بررسی عدم تکرار
   const existingSms = await c.env.DB.prepare(
     'SELECT id, status, transaction_id FROM raw_sms WHERE sms_hash = ? AND user_id = ?'
   )
     .bind(smsHash, userId)
-    .first<{ id: string; status: 'processed' | 'ignored' | 'deleted' | 'manual'; transaction_id: string | null }>();
+    .first<{ id: string; status: string; transaction_id: string | null }>();
 
   if (existingSms) {
-    if (existingSms.status === 'deleted') {
-      return c.json(
-        {
-          success: true,
-          alreadyProcessed: true,
-          status: 'deleted',
-          message: 'این پیامک قبلاً توسط کاربر حذف شده و برای جلوگیری از بازگشت نادیده گرفته شد',
-        },
-        200
-      );
-    }
-
     if (existingSms.status === 'processed') {
-      return c.json(
-        {
-          success: true,
-          alreadyProcessed: true,
-          status: 'processed',
-          transactionId: existingSms.transaction_id,
-          message: 'این پیامک قبلاً ثبت شده است (جلوگیری از رکورد تکراری)',
-        },
-        200
-      );
+      return c.json({
+        success: true,
+        alreadyProcessed: true,
+        status: 'processed',
+        transactionId: existingSms.transaction_id,
+        message: 'این پیامک قبلاً ثبت شده است',
+      });
     }
-
     if (existingSms.status === 'ignored') {
-      return c.json(
-        {
-          success: false,
-          alreadyProcessed: true,
-          isBankSms: false,
-          message: 'پیامک قبلاً غیربانکی تشخیص داده شده است',
-        },
-        200
-      );
+      return c.json({
+        success: false,
+        alreadyProcessed: true,
+        message: 'پیامک قبلاً غیربانکی تشخیص داده شده است',
+      });
     }
   }
 
-  // ۴. استخراج و پارس پیامک با موتور @jibban/sms-parser-ir
-  const parsed = parseBankSms(rawSms);
+  // پارس با موتور پیامک
+  const parsed = parseBankSms(rawSms, body.sender);
 
   if (!parsed.isBankSms || parsed.amount <= 0) {
-    // ثبت در پایگاه داده پیامک‌های خام با وضعیت نادیده‌گرفته‌شده (ignored)
     await c.env.DB.prepare(
-      `INSERT INTO raw_sms (id, sms_hash, user_id, sender, raw_text, status, received_at)
+      `INSERT OR IGNORE INTO raw_sms (id, sms_hash, user_id, sender, raw_text, status, received_at)
        VALUES (?, ?, ?, ?, ?, 'ignored', ?)`
     )
       .bind(smsHash, smsHash, userId, body.sender ?? null, rawSms, receivedAt)
       .run();
 
-    return c.json(
-      {
-        success: false,
-        isBankSms: false,
-        message: 'پیامک غیربانکی یا فاقد مبلغ تراکنش تشخیص داده شد',
-      },
-      200
-    );
+    return c.json({
+      success: false,
+      isBankSms: false,
+      message: 'پیامک غیربانکی یا فاقد مبلغ تراکنش تشخیص داده شد',
+    });
   }
 
-  // ۵. شناسایی یا ایجاد خودکار حساب مبدأ / مقصد متناسب با بانک
+  // تبدیل مبلغ به ریال در صورتی که پارسر به ریال بازنگردانده باشد
+  // (موتور جدید پارمیس مبالغ را مستقیماً به ریال استخراج می‌کند)
+  const amountInRials = Math.round(parsed.amount);
+
+  // جستجوی حساب منطبق
   let matchedAccount: { id: string; name: string; balance: number } | null = null;
   if (parsed.accountNumber) {
     matchedAccount = await c.env.DB.prepare(
@@ -191,113 +167,94 @@ smsRouter.post('/ingest', async (c) => {
       .first<{ id: string; name: string; balance: number }>();
   }
 
-  // اگر حساب متناظری وجود نداشت، یک حساب جدید برای این بانک تعریف می‌شود
+  // ایجاد حساب در صورت عدم وجود
   if (!matchedAccount) {
     const newAccId = `acc_${crypto.randomUUID().slice(0, 8)}`;
     const accName = parsed.bankName ? `بانک ${parsed.bankName}` : 'حساب بانکی';
-    const initBal = parsed.balance ?? (parsed.type === 'credit' ? parsed.amount : 0);
-
     await c.env.DB.prepare(
-      `INSERT INTO accounts (id, user_id, name, type, bank_name, account_number, balance, initial_balance, is_source, is_destination)
-       VALUES (?, ?, ?, 'bank', ?, ?, ?, ?, 1, 1)`
+      `INSERT INTO accounts (id, user_id, name, type, bank_name, account_number, balance, initial_balance)
+       VALUES (?, ?, ?, 'bank', ?, ?, 0, 0)`
     )
-      .bind(newAccId, userId, accName, parsed.bankName ?? null, parsed.accountNumber ?? null, initBal, initBal)
+      .bind(newAccId, userId, accName, parsed.bankName ?? null, parsed.accountNumber ?? null)
       .run();
 
-    matchedAccount = { id: newAccId, name: accName, balance: initBal };
+    matchedAccount = { id: newAccId, name: accName, balance: 0 };
   }
 
   const fromAccountId = parsed.type === 'debit' ? matchedAccount.id : null;
   const toAccountId = parsed.type === 'credit' ? matchedAccount.id : null;
-
-  // ۶. حدس دسته‌بندی اولیه و ایجاد شناسه تراکنش
   const categoryId = autoDetectCategory(parsed.description, parsed.type);
   const transactionId = `tx_${crypto.randomUUID()}`;
   const transactionDate = parsed.transactionDate || receivedAt;
 
-  // ۷. اجرای دسته‌ای ثبت تراکنش، ذخیره پیامک خام و همگام‌سازی موجودی حساب
   const batchStatements: D1PreparedStatement[] = [
+    // ۱. ثبت تراکنش
     c.env.DB.prepare(
       `INSERT INTO transactions (
-        id, user_id, from_account_id, to_account_id, bank_name, account_number, amount, type,
-        balance, category_id, description, raw_sms, sms_hash, transaction_date
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        id, user_id, type, amount, from_account_id, to_account_id,
+        category_id, description, raw_sms_id, transaction_date
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       transactionId,
       userId,
+      parsed.type,
+      amountInRials,
       fromAccountId,
       toAccountId,
-      parsed.bankName,
-      parsed.accountNumber ?? null,
-      parsed.amount,
-      parsed.type,
-      parsed.balance ?? null,
       categoryId,
-      parsed.description ?? null,
-      rawSms,
+      parsed.description ?? (parsed.bankName ? `تراکنش ${parsed.bankName}` : null),
       smsHash,
       transactionDate
     ),
+    // ۲. ثبت پیامک در آرشیو خام
     c.env.DB.prepare(
-      `INSERT INTO raw_sms (
-        id, sms_hash, user_id, sender, raw_text, status, transaction_id, received_at
-      ) VALUES (?, ?, ?, ?, ?, 'processed', ?, ?)`
+      `INSERT OR REPLACE INTO raw_sms (
+        id, sms_hash, user_id, sender, raw_text, bank_name, parsed_amount, parsed_account, status, transaction_id, received_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'processed', ?, ?)`
     ).bind(
       smsHash,
       smsHash,
       userId,
       body.sender ?? null,
       rawSms,
+      parsed.bankName ?? null,
+      amountInRials,
+      parsed.accountNumber ?? null,
       transactionId,
       receivedAt
     ),
   ];
 
-  // همگام‌سازی موجودی حساب
-  if (parsed.balance !== undefined && parsed.balance !== null) {
-    batchStatements.push(
-      c.env.DB.prepare('UPDATE accounts SET balance = ? WHERE id = ? AND user_id = ?')
-        .bind(parsed.balance, matchedAccount.id, userId)
-    );
-  } else if (parsed.type === 'debit') {
+  // ۳. تعدیل مانده حساب
+  if (parsed.type === 'debit') {
     batchStatements.push(
       c.env.DB.prepare('UPDATE accounts SET balance = balance - ? WHERE id = ? AND user_id = ?')
-        .bind(parsed.amount, matchedAccount.id, userId)
+        .bind(amountInRials, matchedAccount.id, userId)
     );
   } else if (parsed.type === 'credit') {
     batchStatements.push(
       c.env.DB.prepare('UPDATE accounts SET balance = balance + ? WHERE id = ? AND user_id = ?')
-        .bind(parsed.amount, matchedAccount.id, userId)
+        .bind(amountInRials, matchedAccount.id, userId)
     );
   }
 
   await c.env.DB.batch(batchStatements);
 
-  const createdTx = {
-    id: transactionId,
-    userId,
-    fromAccountId,
-    toAccountId,
-    fromAccountName: parsed.type === 'debit' ? matchedAccount.name : undefined,
-    toAccountName: parsed.type === 'credit' ? matchedAccount.name : undefined,
-    bankName: parsed.bankName,
-    accountNumber: parsed.accountNumber,
-    amount: parsed.amount,
-    type: parsed.type,
-    balance: parsed.balance,
-    categoryId,
-    description: parsed.description,
-    rawSms,
-    smsHash,
-    transactionDate,
-  };
-
   return c.json(
     {
       success: true,
       isBankSms: true,
-      message: 'پیامک بانکی با موفقیت پردازش و در دفتر حسابداری ثبت شد',
-      transaction: createdTx,
+      message: 'پیامک بانکی با موفقیت پردازش شد',
+      transaction: {
+        id: transactionId,
+        amount: amountInRials,
+        type: parsed.type,
+        bankName: parsed.bankName,
+        accountName: matchedAccount.name,
+        balance: parsed.balance,
+        categoryId,
+        transactionDate,
+      },
     },
     201
   );

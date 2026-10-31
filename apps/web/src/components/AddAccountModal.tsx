@@ -34,7 +34,7 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
   const [accountNumber, setAccountNumber] = useState<string>(initialData?.accountNumber || '');
   const [cardNumber, setCardNumber] = useState<string>(initialData?.cardNumber || '');
   const [initialBalance, setInitialBalance] = useState<string>(
-    initialData ? String(initialData.initialBalance) : '0'
+    initialData ? String(Math.round(initialData.initialBalance / 10)) : '0'
   );
   const [color, setColor] = useState<string>(initialData?.color || '#0284c7');
   const [isSource, setIsSource] = useState<boolean>(initialData?.isSource !== false);
@@ -58,7 +58,7 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
 
     setIsSubmitting(true);
     try {
-      const numBalance = parseInt(initialBalance, 10) || 0;
+      const numBalanceRials = (parseInt(initialBalance, 10) || 0) * 10;
       await onSave({
         name: name.trim(),
         type,
@@ -67,8 +67,8 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
         cardNumber: cardNumber.trim() || undefined,
         color,
         icon: type === 'wallet' ? 'wallet' : type === 'savings' ? 'piggy-bank' : 'credit-card',
-        initialBalance: numBalance,
-        balance: initialData ? initialData.balance : numBalance,
+        initialBalance: numBalanceRials,
+        balance: initialData ? initialData.balance : numBalanceRials,
         isSource,
         isDestination,
       });

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Transaction, Category, Account } from '../types.js';
 import { formatJalali } from '../lib/date.js';
+import { formatToman as formatTomanCurrency } from '../lib/currency.js';
 import {
   TrendingUp,
   TrendingDown,
@@ -80,7 +81,7 @@ export const TransactionsTab: React.FC<TransactionsTabProps> = ({
   });
 
   const formatToman = (amount: number) => {
-    return new Intl.NumberFormat('fa-IR').format(amount);
+    return formatTomanCurrency(amount, { showUnit: false });
   };
 
   const formatDate = (dateStr: string) => {

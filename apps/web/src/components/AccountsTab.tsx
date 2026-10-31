@@ -15,6 +15,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { AddAccountModal } from './AddAccountModal.js';
+import { formatToman as formatTomanCurrency } from '../lib/currency.js';
 
 interface AccountsTabProps {
   accounts: Account[];
@@ -36,7 +37,7 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
 
   const formatToman = (amount: number) => {
-    return new Intl.NumberFormat('fa-IR').format(amount);
+    return formatTomanCurrency(amount, { showUnit: false });
   };
 
   // محاسبات دارایی‌ها

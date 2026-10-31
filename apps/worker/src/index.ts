@@ -7,6 +7,8 @@ import { transactionsRouter } from './routes/transactions.js';
 import { groupsRouter } from './routes/groups.js';
 import { categoriesRouter } from './routes/categories.js';
 import { accountsRouter } from './routes/accounts.js';
+import { loansRouter } from './routes/loans.js';
+import { counterpartiesRouter } from './routes/counterparties.js';
 import { ensureInitialSeed } from './db/seed.js';
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -31,7 +33,7 @@ app.get('/api/health', (c) => {
   return c.json({
     status: 'ok',
     service: 'jibban-worker',
-    version: '0.1.0',
+    version: '2.0.0',
     timestamp: new Date().toISOString(),
   });
 });
@@ -71,6 +73,8 @@ app.route('/api/transactions', transactionsRouter);
 app.route('/api/groups', groupsRouter);
 app.route('/api/categories', categoriesRouter);
 app.route('/api/accounts', accountsRouter);
+app.route('/api/loans', loansRouter);
+app.route('/api/counterparties', counterpartiesRouter);
 
 // ۷. صفحه اصلی
 app.get('/', (c) => {
@@ -79,7 +83,7 @@ app.get('/', (c) => {
     <html lang="fa" dir="rtl">
     <head>
       <meta charset="utf-8">
-      <title>سرویس ابری جیب‌بان (JibBan Worker)</title>
+      <title>سرویس ابری جیب‌بان (JibBan Worker 2.0)</title>
       <style>
         body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
         .card { background: #1e293b; padding: 2rem 3rem; border-radius: 1rem; border: 1px solid #334155; text-align: center; max-width: 480px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); }
@@ -90,9 +94,9 @@ app.get('/', (c) => {
     </head>
     <body>
       <div class="card">
-        <h1>جیب‌بان (JibBan)</h1>
+        <h1>جیب‌بان (JibBan 2.0)</h1>
         <p>بک‌اند ابری سرورلس Cloudflare Worker با دیتابیس D1، پارسر پیامک‌های بانکی ایران و هسته محاسبات دنگ فعال است.</p>
-        <span class="badge">API v0.1.0 Ready</span>
+        <span class="badge">API v2.0.0 Clean Slate Ready</span>
       </div>
     </body>
     </html>

@@ -56,6 +56,39 @@ export function jalaliToGregorian(jy: number, jm: number, jd: number): [number, 
 }
 
 /**
+ * تبدیل رشته تاریخ شمسی و ساعت به ISO 8601
+ */
+export function shamsiToGregorianIso(dateStr: string, timeStr?: string): string | undefined {
+  if (!dateStr) return undefined;
+  const parts = dateStr.split(/[\/\-.]/).map((p) => parseInt(p, 10));
+  if (parts.length < 2) return undefined;
+  let year = parts.length === 3 ? parts[0] : 1404;
+  let month = parts.length === 3 ? parts[1] : parts[0];
+  let day = parts.length === 3 ? parts[2] : parts[1];
+  if (year < 100) year += 1400;
+
+  let hour = 12;
+  let minute = 0;
+  let second = 0;
+  if (timeStr) {
+    const tParts = timeStr.split(':').map((p) => parseInt(p, 10));
+    if (tParts.length >= 2) {
+      hour = tParts[0];
+      minute = tParts[1];
+      second = tParts[2] || 0;
+    }
+  }
+
+  try {
+    const [gy, gm, gd] = jalaliToGregorian(year, month, day);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${gy}-${pad(gm)}-${pad(gd)}T${pad(hour)}:${pad(minute)}:${pad(second)}+03:30`;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * استخراج تاریخ و زمان شمسی از متن و تبدیل آن به ISO 8601
  */
 export function extractTransactionDate(text: string): string | undefined {

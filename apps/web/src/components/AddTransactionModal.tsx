@@ -64,7 +64,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     setIsSubmitting(true);
     try {
       await onAddTransaction({
-        amount: numAmount,
+        amount: numAmount * 10, // تبدیل تومان ورودی کاربر به ریال
         type,
         fromAccountId: fromAccountId || undefined,
         toAccountId: toAccountId || undefined,

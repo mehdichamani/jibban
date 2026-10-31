@@ -1,9 +1,9 @@
 import { ParsedBankSms } from './types.js';
 import { identifyBank } from './banks/bank-definitions.js';
+import { matchParmisPattern } from './matcher.js';
 import {
   parseWithFallback,
   isLikelyBankSms,
-  extractAmount,
   extractBalance,
   extractAccountNumber,
   detectTransactionType,
@@ -13,11 +13,13 @@ import { normalizePersianText } from './utils/cleaner.js';
 import { extractTransactionDate } from './utils/date.js';
 
 /**
- * تابع اصلی پردازش و استخراج اطلاعات پیامک‌های بانکی
+ * تابع اصلی پردازش و استخراج پیامک‌های بانکی ایران بر اساس ۱۰۷۷ الگوی تست‌شده پارمیس
+ * همراه با موتور فال‌بک معنایی (مبالغ خروجی همیشه به ریال هستند)
+ * 
  * @param smsText متن خام پیامک دریافتی
- * @returns نتیجه ساختاریافته شامل مشخصات بانک، نوع تراکنش، مبلغ به تومان و مانده
+ * @param sender شماره یا نام فرستنده پیامک (اختیاری جهت تطبیق سریع‌تر و دقیق‌تر)
  */
-export function parseBankSms(smsText: string): ParsedBankSms {
+export function parseBankSms(smsText: string, sender?: string): ParsedBankSms {
   if (!smsText || typeof smsText !== 'string') {
     return {
       isBankSms: false,
@@ -30,7 +32,7 @@ export function parseBankSms(smsText: string): ParsedBankSms {
 
   const cleaned = normalizePersianText(smsText);
 
-  // در صورتی که پیامک غیربانکی باشد (مانند رمز پویا یا تبلیغات)
+  // پیامک‌های کد تایید یا پیام‌های غیرمالی رد می‌شوند
   if (!isLikelyBankSms(cleaned)) {
     return {
       isBankSms: false,
@@ -41,55 +43,33 @@ export function parseBankSms(smsText: string): ParsedBankSms {
     };
   }
 
-  // ۱. شناسایی نام بانک از متن
+  // ۱. اولویت اول: تطبیق با ۱۰۷۷ الگوی رسمی و تست‌شده پارمیس
+  const parmisMatch = matchParmisPattern(smsText, sender);
+  if (parmisMatch && parmisMatch.amount && parmisMatch.amount > 0) {
+    const balance = parmisMatch.balance ?? extractBalance(cleaned);
+    const accountNumber = parmisMatch.accountNumber ?? extractAccountNumber(cleaned);
+    const description = parmisMatch.description ?? extractDescription(cleaned);
+    const transactionDate = parmisMatch.transactionDate ?? extractTransactionDate(cleaned);
+
+    return {
+      isBankSms: true,
+      bankName: parmisMatch.bankName || 'بانک',
+      type: parmisMatch.type || 'debit',
+      amount: parmisMatch.amount,
+      balance,
+      accountNumber,
+      transactionDate,
+      shamsiDate: parmisMatch.shamsiDate,
+      time: parmisMatch.time,
+      description,
+      rawText: smsText,
+    };
+  }
+
+  // ۲. اولویت دوم: استخراج با موتور فال‌بک معنایی
   const bankRule = identifyBank(cleaned);
   const bankName = bankRule ? bankRule.name : 'بانک ناشناس';
   const defaultCurrency = bankRule?.defaultCurrency ?? 'rial';
 
-  // ۲. در صورت وجود پارسر اختصاصی برای بانک
-  if (bankRule?.customParser) {
-    try {
-      const customResult = bankRule.customParser(cleaned, smsText);
-      if (customResult && customResult.amount && customResult.amount > 0) {
-        return {
-          isBankSms: true,
-          bankName,
-          type: customResult.type ?? 'debit',
-          amount: customResult.amount,
-          balance: customResult.balance,
-          accountNumber: customResult.accountNumber ?? extractAccountNumber(cleaned),
-          transactionDate: customResult.transactionDate ?? extractTransactionDate(cleaned),
-          description: customResult.description ?? extractDescription(cleaned),
-          rawText: smsText,
-        };
-      }
-    } catch {
-      // در صورت بروز خطا در پارسر اختصاصی، به موتور فال‌بک سوئیچ می‌کنیم
-    }
-  }
-
-  // ۳. استخراج به کمک الگوهای جامع و تنظیمات ارز پیش‌فرض بانک
-  const amount = extractAmount(cleaned, defaultCurrency);
-  if (amount <= 0) {
-    // تلاش مجدد با موتور فال‌بک
-    return parseWithFallback(smsText, bankName, defaultCurrency);
-  }
-
-  const type = detectTransactionType(cleaned);
-  const balance = extractBalance(cleaned, defaultCurrency);
-  const accountNumber = extractAccountNumber(cleaned);
-  const transactionDate = extractTransactionDate(cleaned);
-  const description = extractDescription(cleaned);
-
-  return {
-    isBankSms: true,
-    bankName,
-    type,
-    amount,
-    balance,
-    accountNumber,
-    transactionDate,
-    description,
-    rawText: smsText,
-  };
+  return parseWithFallback(smsText, bankName, defaultCurrency);
 }

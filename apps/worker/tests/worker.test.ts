@@ -179,8 +179,8 @@ describe('Worker API Endpoints (فاز ۳)', () => {
     expect(data.success).toBe(true);
     expect(data.isBankSms).toBe(true);
     expect(data.transaction.bankName).toBe('ملی');
-    expect(data.transaction.amount).toBe(250000); // 2,500,000 ریال = 250,000 تومان
-    expect(data.transaction.balance).toBe(1420000);
+    expect(data.transaction.amount).toBe(2500000); // 2,500,000 ریال
+    expect(data.transaction.balance).toBe(14200000);
     expect(data.transaction.categoryId).toBe('cat_supermarket');
   });
 

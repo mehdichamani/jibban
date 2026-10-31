@@ -2,16 +2,17 @@ export interface Account {
   id: string;
   userId: string;
   name: string;
-  type: 'bank' | 'wallet' | 'savings' | 'credit' | 'counterparty';
+  type: 'bank' | 'wallet' | 'savings' | 'credit' | 'debt' | 'counterparty';
   bankName?: string;
   accountNumber?: string;
   cardNumber?: string;
+  sheba?: string;
   color: string;
   icon: string;
-  balance: number; // مانده فعلی به تومان
+  balance: number; // مانده به ریال در دیتابیس
   initialBalance: number;
-  isSource: boolean; // قابل استفاده به عنوان حساب مبدأ
-  isDestination: boolean; // قابل استفاده به عنوان حساب مقصد
+  isSource?: boolean;
+  isDestination?: boolean;
   isArchived?: boolean;
   createdAt?: string;
   recentTransactions?: Transaction[];
@@ -22,7 +23,7 @@ export interface Transaction {
   userId: string;
   bankName?: string;
   accountNumber?: string;
-  amount: number; // همیشه به تومان
+  amount: number; // به ریال در دیتابیس
   type: 'debit' | 'credit' | 'transfer';
   balance?: number;
   categoryId?: string;
@@ -39,39 +40,86 @@ export interface Transaction {
   toAccountColor?: string;
   toAccountIcon?: string;
   toAccountBankName?: string;
+  counterpartyId?: string;
+  counterpartyName?: string;
   description?: string;
+  tag?: string;
   trackingCode?: string;
   rawSms?: string;
+  rawSmsId?: string;
   transactionDate: string;
+  shamsiDate?: string;
 }
 
-export interface GroupMember {
+export interface Category {
   id: string;
+  userId?: string;
+  parentId?: string | null;
   name: string;
-  role?: string;
+  icon?: string;
+  color?: string;
+  type?: 'expense' | 'income' | 'transfer';
+  isIncome?: boolean;
+  children?: Category[];
+}
+
+export interface Counterparty {
+  id: string;
+  userId: string;
+  name: string;
+  phone?: string;
+  balance: number; // ریال
+  notes?: string;
+  createdAt?: string;
+}
+
+export interface Loan {
+  id: string;
+  userId: string;
+  title: string;
+  accountId?: string;
+  accountName?: string;
+  totalAmount: number; // ریال
+  totalProfit: number; // ریال
+  installmentAmount: number; // ریال
+  totalInstallments: number;
+  paidInstallments: number;
+  startDate: string;
+  status: 'active' | 'completed' | 'overdue';
+  installments?: LoanInstallment[];
+}
+
+export interface LoanInstallment {
+  id: string;
+  loanId: string;
+  installmentNumber: number;
+  amount: number; // ریال
+  dueDate: string;
+  paidDate?: string | null;
+  isPaid: boolean;
+  linkedTransactionId?: string | null;
 }
 
 export interface Group {
   id: string;
   name: string;
-  currency: string;
   createdBy: string;
   memberCount?: number;
 }
 
 export interface UserBalanceWithInfo {
-  userId: string;
-  userName: string;
+  counterpartyId: string;
+  name: string;
   netBalance: number;
   totalPaid: number;
   totalShare: number;
 }
 
 export interface SettlementWithInfo {
-  fromUserId: string;
-  fromUserName: string;
-  toUserId: string;
-  toUserName: string;
+  fromId: string;
+  fromName: string;
+  toId: string;
+  toName: string;
   amount: number;
 }
 
@@ -80,13 +128,4 @@ export interface GroupSummaryData {
   totalExpenses: number;
   balances: UserBalanceWithInfo[];
   settlements: SettlementWithInfo[];
-}
-
-export interface Category {
-  id: string;
-  name: string;
-  icon: string;
-  color: string;
-  type?: 'expense' | 'income' | 'transfer';
-  isIncome?: boolean;
 }
