@@ -24,13 +24,13 @@ CREATE TABLE IF NOT EXISTS fiscal_years (
 );
 CREATE INDEX IF NOT EXISTS idx_fiscal_years_user ON fiscal_years(user_id);
 
--- ۳. حساب‌های دارایی، نقد و بانک (Asset & Bank Accounts)
+-- ۳. حساب‌های مالی (Asset, Bank, Expense, Income, Debt Accounts - ۱۰۰٪ منطبق با پارمیس)
 CREATE TABLE IF NOT EXISTS accounts (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
-    name TEXT NOT NULL,                -- مثلاً: بلوبانک، پاسارگاد، کیف پول
-    type TEXT CHECK(type IN ('bank', 'wallet', 'savings', 'credit', 'debt')) DEFAULT 'bank',
-    bank_name TEXT,                    -- نام بانک (تجارت، سامان، ملی، بلو، ویپاد و...)
+    name TEXT NOT NULL,                -- نام حساب (بلوبانک، سوپرمارکت، حقوق، سینا و...)
+    type TEXT CHECK(type IN ('bank', 'wallet', 'savings', 'credit', 'debt', 'expense', 'income')) DEFAULT 'bank',
+    bank_name TEXT,                    -- نام بانک
     account_number TEXT,               -- شماره حساب
     card_number TEXT,                  -- شماره کارت ۱۶ رقمی یا ۴ رقم آخر
     sheba TEXT,                        -- شماره شبا

@@ -1,19 +1,17 @@
 import React, { useState } from 'react';
-import { Account, Category } from '../types.js';
-import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Check, Hash, FileText } from 'lucide-react';
+import { Account } from '../types.js';
+import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Check } from 'lucide-react';
 import { JalaliDatePicker } from './JalaliDatePicker.js';
 
 interface AddTransactionModalProps {
   isOpen: boolean;
   onClose: () => void;
   accounts: Account[];
-  categories: Category[];
   onAddTransaction: (data: {
     amount: number;
     type: 'debit' | 'credit' | 'transfer';
     fromAccountId?: string;
     toAccountId?: string;
-    categoryId?: string;
     description?: string;
     trackingCode?: string;
     transactionDate?: string;
@@ -24,7 +22,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   isOpen,
   onClose,
   accounts,
-  categories,
   onAddTransaction,
 }) => {
   if (!isOpen) return null;
@@ -32,12 +29,11 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [type, setType] = useState<'debit' | 'credit' | 'transfer'>('debit');
   const [amount, setAmount] = useState<string>('');
   const [fromAccountId, setFromAccountId] = useState<string>(
-    accounts.find((a) => a.isSource && a.type !== 'counterparty')?.id || accounts[0]?.id || ''
+    accounts.find((a) => a.type === 'bank' || a.type === 'wallet')?.id || accounts[0]?.id || ''
   );
   const [toAccountId, setToAccountId] = useState<string>(
-    accounts.find((a) => a.isDestination && a.id !== fromAccountId)?.id || ''
+    accounts.find((a) => a.type === 'expense')?.id || accounts[1]?.id || ''
   );
-  const [categoryId, setCategoryId] = useState<string>('cat_supermarket');
   const [description, setDescription] = useState<string>('');
   const [trackingCode, setTrackingCode] = useState<string>('');
   const [transactionDate, setTransactionDate] = useState<string>(() =>
@@ -48,27 +44,28 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const formatNumberWithCommas = (val: string) => {
     const raw = val.replace(/[^0-9]/g, '');
     if (!raw) return '';
-    return new Intl.NumberFormat('fa-IR').format(parseInt(raw, 10));
+    return Number(raw).toLocaleString('en-US');
   };
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value.replace(/[^0-9]/g, '');
-    setAmount(raw);
+    setAmount(formatNumberWithCommas(e.target.value));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const numAmount = parseInt(amount, 10);
-    if (isNaN(numAmount) || numAmount <= 0) return;
+    const raw = parseInt(amount.replace(/,/g, ''), 10);
+    if (isNaN(raw) || raw <= 0) {
+      alert('لطفاً مبلغ معتبری به تومان وارد کنید');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
       await onAddTransaction({
-        amount: numAmount * 10, // تبدیل تومان ورودی کاربر به ریال
+        amount: raw * 10, // تبدیل تومان ورودی کاربر به ریال
         type,
         fromAccountId: fromAccountId || undefined,
         toAccountId: toAccountId || undefined,
-        categoryId: categoryId || undefined,
         description: description.trim() || undefined,
         trackingCode: trackingCode.trim() || undefined,
         transactionDate: new Date(transactionDate).toISOString(),
@@ -79,223 +76,173 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     }
   };
 
-  // فیلتر حساب‌های مجاز برای مبدا و مقصد
-  const sourceAccounts = accounts.filter((a) => {
-    if (type === 'credit') return true; // در درآمد، طرف حساب یا کارفرما می‌تواند مبدا باشد
-    return a.isSource;
-  });
-
-  const destinationAccounts = accounts.filter((a) => {
-    if (type === 'debit') return true; // در هزینه، فروشگاه یا هر حساب می‌تواند مقصد باشد
-    return a.isDestination && (type !== 'transfer' || a.id !== fromAccountId);
-  });
-
-  const filteredCategories = categories.filter((c) => {
-    if (type === 'credit') return c.isIncome || c.type === 'income';
-    if (type === 'transfer') return c.type === 'transfer' || c.id === 'cat_transfer';
-    return !c.isIncome && c.type !== 'transfer';
-  });
+  const sourceAccounts = accounts.filter(
+    (a) => a.type === 'bank' || a.type === 'wallet' || a.type === 'savings' || a.type === 'income' || a.type === 'debt'
+  );
+  const destAccounts = accounts.filter(
+    (a) => a.type === 'expense' || a.type === 'bank' || a.type === 'wallet' || a.type === 'savings' || a.type === 'debt'
+  );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-        {/* هدر */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <div>
-            <h3 className="text-base font-bold text-white">ثبت تراکنش حسابداری</h3>
-            <p className="text-xs text-slate-400">ثبت گردش مالی با تفکیک حساب‌های مبدأ و مقصد</p>
-          </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+      <div className="glass-card w-full max-w-lg p-5 sm:p-6 border-slate-700/80 shadow-2xl relative max-h-[92vh] overflow-y-auto">
+        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+          <h3 className="text-base font-bold text-white">ثبت سند مالی جدید</h3>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center transition"
+            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* تب‌های نوع تراکنش */}
-        <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-950/80 rounded-2xl border border-slate-800">
-          <button
-            type="button"
-            onClick={() => {
-              setType('debit');
-              setCategoryId('cat_supermarket');
-            }}
-            className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition ${
-              type === 'debit'
-                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <ArrowDownLeft className="w-4 h-4 text-rose-400" />
-            <span>هزینه (برداشت)</span>
-          </button>
+        <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+          {/* نوع سند */}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">نوع سند</label>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setType('debit')}
+                className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition border ${
+                  type === 'debit'
+                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                    : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:bg-slate-800'
+                }`}
+              >
+                <ArrowDownLeft className="w-4 h-4" />
+                <span>برداشت (هزینه)</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setType('credit');
-              setCategoryId('cat_salary');
-            }}
-            className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition ${
-              type === 'credit'
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <ArrowUpRight className="w-4 h-4 text-emerald-400" />
-            <span>درآمد (واریز)</span>
-          </button>
+              <button
+                type="button"
+                onClick={() => setType('credit')}
+                className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition border ${
+                  type === 'credit'
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:bg-slate-800'
+                }`}
+              >
+                <ArrowUpRight className="w-4 h-4" />
+                <span>واریز (درآمد)</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setType('transfer');
-              setCategoryId('cat_transfer');
-            }}
-            className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition ${
-              type === 'transfer'
-                ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <ArrowLeftRight className="w-4 h-4 text-sky-400" />
-            <span>انتقال بین‌حسابی</span>
-          </button>
-        </div>
+              <button
+                type="button"
+                onClick={() => setType('transfer')}
+                className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition border ${
+                  type === 'transfer'
+                    ? 'bg-sky-500/20 text-sky-300 border-sky-500/40'
+                    : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:bg-slate-800'
+                }`}
+              >
+                <ArrowLeftRight className="w-4 h-4" />
+                <span>انتقال بین‌حسابی</span>
+              </button>
+            </div>
+          </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
           {/* مبلغ */}
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs font-semibold text-slate-300">مبلغ تراکنش (تومان):</label>
-              {amount && parseInt(amount, 10) > 0 && (
-                <span className="text-xs text-sky-400 font-mono font-bold">
-                  {formatNumberWithCommas(amount)} تومان
-                </span>
-              )}
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">مبلغ سند (تومان)</label>
+            <div className="relative">
+              <input
+                type="text"
+                dir="ltr"
+                value={amount}
+                onChange={handleAmountChange}
+                placeholder="مثلاً: ۵۰,۰۰۰"
+                className="w-full bg-slate-900/80 border border-slate-700/80 rounded-xl py-2.5 pl-3 pr-14 text-white text-base font-bold font-mono focus:outline-none focus:border-sky-500 transition"
+                required
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 pointer-events-none">
+                تومان
+              </span>
             </div>
-            <input
-              type="text"
+          </div>
+
+          {/* حساب مبدأ */}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">از حساب (حساب مبدأ)</label>
+            <select
+              value={fromAccountId}
+              onChange={(e) => setFromAccountId(e.target.value)}
+              className="w-full bg-slate-900/80 border border-slate-700/80 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-500 transition"
               required
-              autoFocus
-              value={amount ? formatNumberWithCommas(amount) : ''}
-              onChange={handleAmountChange}
-              placeholder="مثلاً: ۲۵۰,۰۰۰"
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm sm:text-base text-slate-100 placeholder-slate-500 font-mono focus:outline-none focus:border-sky-500 text-left"
+            >
+              <option value="">انتخاب حساب مبدأ...</option>
+              {sourceAccounts.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name} ({acc.type === 'bank' ? 'بانک' : acc.type === 'wallet' ? 'صندوق' : acc.type})
+                </option>
+              ))}
+              {accounts.filter(a => !sourceAccounts.includes(a)).map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name} ({acc.type})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* حساب مقصد */}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">به حساب (حساب مقصد / بابت / هزینه)</label>
+            <select
+              value={toAccountId}
+              onChange={(e) => setToAccountId(e.target.value)}
+              className="w-full bg-slate-900/80 border border-slate-700/80 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-500 transition"
+              required
+            >
+              <option value="">انتخاب حساب مقصد...</option>
+              {destAccounts.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name} ({acc.type === 'expense' ? 'هزینه' : acc.type === 'bank' ? 'بانک' : acc.type})
+                </option>
+              ))}
+              {accounts.filter(a => !destAccounts.includes(a)).map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name} ({acc.type})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* تاریخ */}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">تاریخ سند</label>
+            <JalaliDatePicker
+              value={transactionDate}
+              onChange={(iso: string) => setTransactionDate(iso)}
             />
           </div>
 
-          {/* حساب مبدأ و حساب مقصد */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* حساب مبدأ */}
-            <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-1">
-                {type === 'credit' ? 'حساب یا شخص مبدأ (واریزکننده):' : 'حساب مبدأ (برداشت از):'}
-              </label>
-              <select
-                value={fromAccountId}
-                onChange={(e) => setFromAccountId(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs sm:text-sm text-slate-100 focus:outline-none focus:border-sky-500"
-              >
-                <option value="">(انتخاب نشده)</option>
-                {sourceAccounts.map((acc) => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.name} {acc.balance ? `(${new Intl.NumberFormat('fa-IR').format(acc.balance)} ت)` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* حساب مقصد */}
-            <div>
-              <label className="text-xs font-semibold text-slate-300 block mb-1">
-                {type === 'debit' ? 'حساب مقصد یا پذیرنده:' : 'حساب مقصد (واریز به):'}
-              </label>
-              <select
-                value={toAccountId}
-                onChange={(e) => setToAccountId(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs sm:text-sm text-slate-100 focus:outline-none focus:border-sky-500"
-              >
-                <option value="">(انتخاب نشده)</option>
-                {destinationAccounts.map((acc) => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.name} {acc.balance ? `(${new Intl.NumberFormat('fa-IR').format(acc.balance)} ت)` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* دسته‌بندی تراکنش */}
+          {/* شرح و بابت */}
           <div>
-            <label className="text-xs font-semibold text-slate-300 block mb-1.5">دسته‌بندی تراکنش:</label>
-            <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1">
-              {filteredCategories.map((cat) => {
-                const isSelected = categoryId === cat.id;
-                return (
-                  <button
-                    key={cat.id}
-                    type="button"
-                    onClick={() => setCategoryId(cat.id)}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition ${
-                      isSelected
-                        ? 'border-sky-500 bg-sky-500/20 text-sky-300 shadow-sm'
-                        : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:bg-slate-800/40'
-                    }`}
-                  >
-                    <span>{cat.icon}</span>
-                    <span>{cat.name}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* تاریخ شمسی */}
-          <JalaliDatePicker
-            value={transactionDate}
-            onChange={setTransactionDate}
-            label="تاریخ و زمان تراکنش (شمسی):"
-          />
-
-          <div>
-            <label className="text-xs font-semibold text-slate-300 block mb-1">کد پیگیری / ارجاع (اختیاری):</label>
-            <input
-              type="text"
-              value={trackingCode}
-              onChange={(e) => setTrackingCode(e.target.value)}
-              placeholder="مثلاً: ۹۸۴۵۱۲"
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-500 font-mono text-left focus:outline-none focus:border-sky-500"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold text-slate-300 block mb-1">شرح و بابت تراکنش:</label>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">بابت و شرح سند</label>
             <input
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="مثلاً: خرید میوه، ناهار شرکت، کارت به کارت برای اجاره..."
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500"
+              placeholder="مثلاً: خرید میوه یا نان"
+              className="w-full bg-slate-900/80 border border-slate-700/80 rounded-xl py-2.5 px-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 transition"
             />
           </div>
 
-          {/* دکمه‌های اقدام */}
-          <div className="flex items-center gap-2.5 pt-2">
-            <button
-              type="submit"
-              disabled={isSubmitting || !amount}
-              className="flex-1 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-bold py-2.5 rounded-xl text-xs sm:text-sm transition shadow-lg shadow-sky-500/20 disabled:opacity-50"
-            >
-              {isSubmitting ? 'در حال ثبت...' : 'ثبت قطعی در دفتر حسابداری'}
-            </button>
+          <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-800">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs sm:text-sm font-semibold transition"
+              className="px-4 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:bg-slate-800 transition"
             >
               انصراف
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="inline-flex items-center gap-1.5 bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-white font-bold px-5 py-2.5 rounded-xl text-xs transition shadow-lg shadow-sky-500/20"
+            >
+              <Check className="w-4 h-4" />
+              <span>{isSubmitting ? 'در حال ثبت...' : 'ثبت سند'}</span>
             </button>
           </div>
         </form>

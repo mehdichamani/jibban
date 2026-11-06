@@ -199,26 +199,26 @@ export const api = {
   // ==================== بخش تراکنش‌های حسابداری (Transactions) ====================
 
   /**
-   * دریافت تراکنش‌ها از دیتابیس با فیلترها و مرتب‌سازی
+   * دریافت تراکنش‌ها از دیتابیس با فیلترها و صفحه‌بندی
    */
   async getTransactions(filter?: {
     type?: string;
-    categoryId?: string;
     accountId?: string;
     fromAccountId?: string;
     toAccountId?: string;
     limit?: number;
+    offset?: number;
   }): Promise<Transaction[]> {
     try {
       const token = getSyncToken();
       let url = `${API_BASE}/transactions`;
       const params = new URLSearchParams();
       if (filter?.type) params.append('type', filter.type);
-      if (filter?.categoryId) params.append('categoryId', filter.categoryId);
       if (filter?.accountId) params.append('accountId', filter.accountId);
       if (filter?.fromAccountId) params.append('fromAccountId', filter.fromAccountId);
       if (filter?.toAccountId) params.append('toAccountId', filter.toAccountId);
-      params.append('limit', String(filter?.limit || 1000));
+      params.append('limit', String(filter?.limit || 25));
+      if (filter?.offset) params.append('offset', String(filter.offset));
       url += `?${params.toString()}`;
 
       const res = await fetch(url, {
@@ -227,7 +227,9 @@ export const api = {
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
-          saveLocalTransactions(json.data);
+          if (!filter?.offset || filter.offset === 0) {
+            saveLocalTransactions(json.data);
+          }
           return json.data;
         }
       }
@@ -237,13 +239,14 @@ export const api = {
 
     let txs = getLocalTransactions();
     if (filter?.type) txs = txs.filter((t) => t.type === filter.type);
-    if (filter?.categoryId) txs = txs.filter((t) => t.categoryId === filter.categoryId);
     if (filter?.accountId) {
       txs = txs.filter((t) => t.fromAccountId === filter.accountId || t.toAccountId === filter.accountId);
     }
     if (filter?.fromAccountId) txs = txs.filter((t) => t.fromAccountId === filter.fromAccountId);
     if (filter?.toAccountId) txs = txs.filter((t) => t.toAccountId === filter.toAccountId);
-    return txs;
+    const offset = filter?.offset || 0;
+    const limit = filter?.limit || 25;
+    return txs.slice(offset, offset + limit);
   },
 
   /**

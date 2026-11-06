@@ -69,12 +69,18 @@ export const SplitwiseTab: React.FC<SplitwiseTabProps> = ({ onOpenAddExpense }) 
     // نام اعضا
     const userNames: Record<string, string> = {
       من: 'من (کاربر اصلی)',
-      رضا: 'رضا',
-      سارا: 'سارا',
     };
 
-    // اطمینان از حضور تمام اعضای ۳ نفره
-    const allUsers = ['من', 'رضا', 'سارا'];
+    // استخراج پویا اعضای شرکت‌کننده در هزینه‌ها
+    const userSet = new Set<string>(['من']);
+    for (const exp of expenses) {
+      if (exp.payerName) userSet.add(exp.payerName);
+      for (const s of exp.splits) {
+        if (s.userId) userSet.add(s.userId);
+      }
+    }
+
+    const allUsers = Array.from(userSet);
     const membersList = allUsers.map((uId) => {
       const b = balances[uId] || { userId: uId, netBalance: 0, totalPaid: 0, totalShare: 0 };
       return {
@@ -286,38 +292,44 @@ export const SplitwiseTab: React.FC<SplitwiseTabProps> = ({ onOpenAddExpense }) 
         </h3>
 
         <div className="glass-card divide-y divide-slate-800/80 overflow-hidden">
-          {expenses.map((exp) => (
-            <div key={exp.id} className="p-3.5 sm:p-4 flex items-center justify-between gap-3">
-              <div className="space-y-1">
-                <div className="text-sm font-bold text-slate-200">{exp.description}</div>
-                <div className="text-xs text-slate-400 flex flex-wrap items-center gap-2">
-                  <span>پرداخت‌کننده: <strong className="text-slate-300">{exp.payerName}</strong></span>
-                  <span>•</span>
-                  <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20">
-                    {exp.splitType === 'percentage' ? (
-                      <>
-                        <Percent className="w-3 h-3" />
-                        <span>تقسیم درصدی ({exp.splits.map((s) => `${s.userId}: ${s.percentage || Math.round((s.owedAmount / exp.amount) * 100)}٪`).join('، ')})</span>
-                      </>
-                    ) : (
-                      <>
-                        <Users className="w-3 h-3" />
-                        <span>تقسیم مساوی بین {exp.splits.length} نفر</span>
-                      </>
-                    )}
-                  </span>
-                  <span>•</span>
-                  <span className="text-[11px] text-slate-400" title={formatJalali(exp.date, 'full')}>
-                    {formatJalali(exp.date, 'relative')}
-                  </span>
+          {expenses.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 text-xs sm:text-sm">
+              هیچ هزینه گروهی ثبت نشده است. با دکمه بالا یا تبدیل تراکنش به دنگ می‌توانید هزینه جدید اضافه کنید.
+            </div>
+          ) : (
+            expenses.map((exp) => (
+              <div key={exp.id} className="p-3.5 sm:p-4 flex items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="text-sm font-bold text-slate-200">{exp.description}</div>
+                  <div className="text-xs text-slate-400 flex flex-wrap items-center gap-2">
+                    <span>پرداخت‌کننده: <strong className="text-slate-300">{exp.payerName}</strong></span>
+                    <span>•</span>
+                    <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                      {exp.splitType === 'percentage' ? (
+                        <>
+                          <Percent className="w-3 h-3" />
+                          <span>تقسیم درصدی ({exp.splits.map((s) => `${s.userId}: ${s.percentage || Math.round((s.owedAmount / exp.amount) * 100)}٪`).join('، ')})</span>
+                        </>
+                      ) : (
+                        <>
+                          <Users className="w-3 h-3" />
+                          <span>تقسیم مساوی بین {exp.splits.length} نفر</span>
+                        </>
+                      )}
+                    </span>
+                    <span>•</span>
+                    <span className="text-[11px] text-slate-400" title={formatJalali(exp.date, 'full')}>
+                      {formatJalali(exp.date, 'relative')}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-sm font-bold font-mono text-purple-300 shrink-0">
+                  {formatToman(exp.amount)} <span className="text-xs font-normal text-slate-400">تومان</span>
                 </div>
               </div>
-
-              <div className="text-sm font-bold font-mono text-purple-300 shrink-0">
-                {formatToman(exp.amount)} <span className="text-xs font-normal text-slate-400">تومان</span>
-              </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
     </div>

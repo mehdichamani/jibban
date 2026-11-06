@@ -2,7 +2,7 @@ export interface Account {
   id: string;
   userId: string;
   name: string;
-  type: 'bank' | 'wallet' | 'savings' | 'credit' | 'debt' | 'counterparty';
+  type: 'bank' | 'wallet' | 'savings' | 'credit' | 'debt' | 'counterparty' | 'expense' | 'income';
   bankName?: string;
   accountNumber?: string;
   cardNumber?: string;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Transaction, Category, Account } from './types.js';
+import { Transaction, Account } from './types.js';
 import { api } from './lib/api.js';
 import { Header } from './components/Header.js';
 import { Navigation, TabType } from './components/Navigation.js';
@@ -16,13 +16,16 @@ import { AddTransactionModal } from './components/AddTransactionModal.js';
 import { EditTransactionModal } from './components/EditTransactionModal.js';
 import { CheckCircle2 } from 'lucide-react';
 
+const PAGE_SIZE = 25;
+
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('transactions');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [hasMore, setHasMore] = useState<boolean>(true);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
 
   // وضعیت‌های مودال
   const [isSimulatorOpen, setIsSimulatorOpen] = useState<boolean>(false);
@@ -42,16 +45,36 @@ export const App: React.FC = () => {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [txList, accList, catList] = await Promise.all([
-        api.getTransactions(),
+      const [txList, accList] = await Promise.all([
+        api.getTransactions({ limit: PAGE_SIZE, offset: 0 }),
         api.getAccounts(),
-        api.getCategories(),
       ]);
       setTransactions(txList);
       setAccounts(accList);
-      setCategories(catList);
+      setHasMore(txList.length >= PAGE_SIZE);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleLoadMore = async () => {
+    if (isLoadingMore || !hasMore) return;
+    setIsLoadingMore(true);
+    try {
+      const nextBatch = await api.getTransactions({
+        limit: PAGE_SIZE,
+        offset: transactions.length,
+      });
+      if (nextBatch.length > 0) {
+        setTransactions((prev) => {
+          const existingIds = new Set(prev.map((t) => t.id));
+          const uniqueNew = nextBatch.filter((t) => !existingIds.has(t.id));
+          return [...prev, ...uniqueNew];
+        });
+      }
+      setHasMore(nextBatch.length >= PAGE_SIZE);
+    } finally {
+      setIsLoadingMore(false);
     }
   };
 
@@ -65,7 +88,6 @@ export const App: React.FC = () => {
     type: 'debit' | 'credit' | 'transfer';
     fromAccountId?: string;
     toAccountId?: string;
-    categoryId?: string;
     description?: string;
     trackingCode?: string;
     transactionDate?: string;
@@ -89,8 +111,6 @@ export const App: React.FC = () => {
       type: 'debit' | 'credit' | 'transfer' | 'compound';
       fromAccountId?: string | null;
       toAccountId?: string | null;
-      categoryId?: string | null;
-      counterpartyId?: string | null;
       description?: string;
       transactionDate?: string;
       shamsiDate?: string;
@@ -207,15 +227,14 @@ export const App: React.FC = () => {
     const list: GroupExpenseRecord[] = saved ? JSON.parse(saved) : [];
     localStorage.setItem('jibban_local_group_expenses', JSON.stringify([newRecord, ...list]));
 
-    const splitLabel = data.splitType === 'percentage' ? 'درصدی' : 'مساوی';
-    showToast(`هزینه "${data.description}" به مبلغ ${new Intl.NumberFormat('fa-IR').format(data.amount)} ت (${splitLabel}) ثبت شد.`);
+    showToast(`هزینه "${data.description}" در گروه دنگ ذخیره شد.`);
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
-      {/* پیام بازخورد شناور (Toast) */}
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-sky-500/30 selection:text-sky-200">
+      {/* اعلان موفقیت / Toast */}
       {toastMessage && (
-        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-slate-950 px-4 py-2.5 rounded-2xl shadow-xl font-bold text-xs sm:text-sm flex items-center gap-2 animate-fadeIn">
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-emerald-500/90 text-slate-950 font-bold px-4 py-2.5 rounded-2xl shadow-xl shadow-emerald-500/20 backdrop-blur-md text-xs sm:text-sm animate-fade-in">
           <CheckCircle2 className="w-4 h-4 shrink-0" />
           <span>{toastMessage}</span>
         </div>
@@ -233,7 +252,6 @@ export const App: React.FC = () => {
           {activeTab === 'transactions' && (
             <TransactionsTab
               transactions={transactions}
-              categories={categories}
               accounts={accounts}
               selectedAccountId={selectedAccountId}
               onSelectAccount={setSelectedAccountId}
@@ -241,6 +259,9 @@ export const App: React.FC = () => {
               onOpenEditModal={(tx) => setEditingTx(tx)}
               onOpenSplitModal={(tx) => setSplitModalTx(tx)}
               onDeleteTransaction={handleDeleteTransaction}
+              onLoadMore={handleLoadMore}
+              hasMore={hasMore}
+              isLoadingMore={isLoadingMore}
             />
           )}
 
@@ -261,7 +282,6 @@ export const App: React.FC = () => {
           {activeTab === 'analytics' && (
             <AnalyticsTab
               transactions={transactions}
-              categories={categories}
               accounts={accounts}
             />
           )}
@@ -275,7 +295,6 @@ export const App: React.FC = () => {
         isOpen={isAddTxOpen}
         onClose={() => setIsAddTxOpen(false)}
         accounts={accounts}
-        categories={categories}
         onAddTransaction={handleAddTransaction}
       />
 
@@ -285,7 +304,6 @@ export const App: React.FC = () => {
         onClose={() => setEditingTx(null)}
         transaction={editingTx}
         accounts={accounts}
-        categories={categories}
         onUpdateTransaction={handleUpdateTransaction}
       />
 

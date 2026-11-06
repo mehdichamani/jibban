@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Account, Category, Transaction } from '../types.js';
-import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Check, Hash, Edit3 } from 'lucide-react';
+import { Account, Transaction } from '../types.js';
+import { X, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Check, Edit3 } from 'lucide-react';
 import { JalaliDatePicker } from './JalaliDatePicker.js';
 
 interface EditTransactionModalProps {
@@ -8,14 +8,11 @@ interface EditTransactionModalProps {
   onClose: () => void;
   transaction: Transaction | null;
   accounts: Account[];
-  categories: Category[];
   onUpdateTransaction: (id: string, data: {
     amount: number;
     type: 'debit' | 'credit' | 'transfer' | 'compound';
     fromAccountId?: string | null;
     toAccountId?: string | null;
-    categoryId?: string | null;
-    counterpartyId?: string | null;
     description?: string;
     transactionDate?: string;
     shamsiDate?: string;
@@ -27,7 +24,6 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
   onClose,
   transaction,
   accounts,
-  categories,
   onUpdateTransaction,
 }) => {
   if (!isOpen || !transaction) return null;
@@ -36,7 +32,6 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
   const [amount, setAmount] = useState<string>(String(Math.round(transaction.amount / 10))); // نمایش به تومان
   const [fromAccountId, setFromAccountId] = useState<string>(transaction.fromAccountId || '');
   const [toAccountId, setToAccountId] = useState<string>(transaction.toAccountId || '');
-  const [categoryId, setCategoryId] = useState<string>(transaction.categoryId || '');
   const [description, setDescription] = useState<string>(transaction.description || '');
   const [transactionDate, setTransactionDate] = useState<string>(transaction.transactionDate);
   const [shamsiDate, setShamsiDate] = useState<string>(transaction.shamsiDate || '');
@@ -69,7 +64,6 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
         type,
         fromAccountId: fromAccountId || null,
         toAccountId: toAccountId || null,
-        categoryId: categoryId || null,
         description: description.trim() || undefined,
         transactionDate,
         shamsiDate: shamsiDate || undefined,
@@ -80,13 +74,21 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
     }
   };
 
+  // تفکیک حساب‌ها برای انتخاب راحت‌تر در لیست
+  const sourceAccounts = accounts.filter(
+    (a) => a.type === 'bank' || a.type === 'wallet' || a.type === 'savings' || a.type === 'income' || a.type === 'debt'
+  );
+  const destAccounts = accounts.filter(
+    (a) => a.type === 'expense' || a.type === 'bank' || a.type === 'wallet' || a.type === 'savings' || a.type === 'debt'
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
       <div className="glass-card w-full max-w-lg p-5 sm:p-6 border-slate-700/80 shadow-2xl relative max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between pb-4 border-b border-slate-800">
           <div className="flex items-center gap-2 text-sky-400">
             <Edit3 className="w-5 h-5" />
-            <h3 className="text-base font-bold text-white">ویرایش و اصلاح تراکنش</h3>
+            <h3 className="text-base font-bold text-white">ویرایش و اصلاح سند حسابداری</h3>
           </div>
           <button
             onClick={onClose}
@@ -97,9 +99,9 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-          {/* نوع تراکنش */}
+          {/* نوع سند */}
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">نوع تراکنش</label>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">نوع سند</label>
             <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
@@ -137,14 +139,14 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                 }`}
               >
                 <ArrowLeftRight className="w-4 h-4" />
-                <span>انتقال بین‌بانکی</span>
+                <span>انتقال بین‌حسابی</span>
               </button>
             </div>
           </div>
 
           {/* مبلغ */}
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">مبلغ تراکنش (تومان)</label>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">مبلغ سند (تومان)</label>
             <div className="relative">
               <input
                 type="text"
@@ -162,63 +164,54 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
           </div>
 
           {/* حساب مبدأ */}
-          {(type === 'debit' || type === 'transfer') && (
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">حساب پرداخت‌کننده (مبدأ)</label>
-              <select
-                value={fromAccountId}
-                onChange={(e) => setFromAccountId(e.target.value)}
-                className="w-full bg-slate-900/80 border border-slate-700/80 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-500 transition"
-                required
-              >
-                <option value="">انتخاب حساب مبدأ...</option>
-                {accounts.map((acc) => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.name} ({Math.round((acc.balance || 0) / 10).toLocaleString()} تومان)
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">
+              از حساب (حساب مبدأ / بدهکار)
+            </label>
+            <select
+              value={fromAccountId}
+              onChange={(e) => setFromAccountId(e.target.value)}
+              className="w-full bg-slate-900/80 border border-slate-700/80 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-500 transition"
+            >
+              <option value="">بدون حساب مبدأ (یا انتخاب کنید)...</option>
+              {sourceAccounts.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name} ({acc.type === 'bank' ? 'بانک' : acc.type === 'wallet' ? 'صندوق/کیف' : acc.type})
+                </option>
+              ))}
+              {/* بقیه حساب‌ها در صورت نیاز */}
+              {accounts.filter(a => !sourceAccounts.includes(a)).map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name} ({acc.type})
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* حساب مقصد */}
-          {(type === 'credit' || type === 'transfer') && (
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">حساب دریافت‌کننده (مقصد)</label>
-              <select
-                value={toAccountId}
-                onChange={(e) => setToAccountId(e.target.value)}
-                className="w-full bg-slate-900/80 border border-slate-700/80 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-500 transition"
-                required
-              >
-                <option value="">انتخاب حساب مقصد...</option>
-                {accounts.map((acc) => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.name} ({Math.round((acc.balance || 0) / 10).toLocaleString()} تومان)
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* دسته‌بندی */}
-          {type !== 'transfer' && (
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">دسته‌بندی سرفصل</label>
-              <select
-                value={categoryId}
-                onChange={(e) => setCategoryId(e.target.value)}
-                className="w-full bg-slate-900/80 border border-slate-700/80 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-500 transition"
-              >
-                <option value="">بدون دسته‌بندی...</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.icon || '🏷️'} {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">
+              به حساب (حساب مقصد / بابت / هزینه)
+            </label>
+            <select
+              value={toAccountId}
+              onChange={(e) => setToAccountId(e.target.value)}
+              className="w-full bg-slate-900/80 border border-slate-700/80 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-500 transition"
+            >
+              <option value="">بدون حساب مقصد (یا انتخاب کنید)...</option>
+              {destAccounts.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name} ({acc.type === 'expense' ? 'هزینه' : acc.type === 'bank' ? 'بانک' : acc.type})
+                </option>
+              ))}
+              {/* بقیه حساب‌ها در صورت نیاز */}
+              {accounts.filter(a => !destAccounts.includes(a)).map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name} ({acc.type})
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* تاریخ تراکنش */}
           <div>
@@ -233,7 +226,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
 
           {/* بابت و شرح */}
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">بابت و شرح تراکنش</label>
+            <label className="block text-xs font-medium text-slate-400 mb-1.5">بابت و شرح سند</label>
             <input
               type="text"
               value={description}

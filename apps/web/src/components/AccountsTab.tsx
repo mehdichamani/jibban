@@ -73,11 +73,16 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
       case 'bank':
         return 'حساب بانکی';
       case 'wallet':
-        return 'کیف پول نقد';
+        return 'صندوق / کیف پول';
+      case 'expense':
+        return 'سرفصل هزینه';
+      case 'income':
+        return 'سرفصل درآمد';
       case 'savings':
         return 'پس‌انداز و صندوق';
       case 'counterparty':
-        return 'طرف‌حساب';
+      case 'debt':
+        return 'شخص / طرف‌حساب';
       case 'credit':
         return 'کارت اعتباری';
       default:
@@ -144,9 +149,10 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
           {[
             { id: 'all', label: 'همه حساب‌ها' },
             { id: 'bank', label: 'حساب‌های بانکی' },
-            { id: 'wallet', label: 'کیف پول نقد' },
-            { id: 'savings', label: 'پس‌انداز' },
-            { id: 'counterparty', label: 'طرف‌حساب‌ها' },
+            { id: 'wallet', label: 'صندوق و کیف پول' },
+            { id: 'expense', label: 'سرفصل‌های هزینه' },
+            { id: 'income', label: 'سرفصل‌های درآمد' },
+            { id: 'debt', label: 'طرف‌حساب‌ها و اشخاص' },
           ].map((item) => (
             <button
               key={item.id}
