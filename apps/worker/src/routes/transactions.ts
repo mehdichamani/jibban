@@ -92,7 +92,10 @@ transactionsRouter.get('/', async (c) => {
   const txList = (results || []) as Transaction[];
 
   // الحاق آیتم‌های تراکنش‌های مرکب
-  const compoundIds = txList.filter(t => t.is_compound || t.type === 'compound').map(t => t.id);
+  const compoundIds = txList
+    .filter(t => t.isCompound || t.is_compound || t.type === 'compound')
+    .map(t => t.id);
+
   if (compoundIds.length > 0) {
     const placeholders = compoundIds.map(() => '?').join(',');
     const itemsRes = await c.env.DB.prepare(`
@@ -101,24 +104,34 @@ transactionsRouter.get('/', async (c) => {
         ti.entry_type as entryType, ti.account_id as accountId,
         ti.category_id as categoryId, ti.counterparty_id as counterpartyId,
         ti.amount, ti.description, ti.created_at as createdAt,
-        a.name as accountName, c.name as categoryName, cp.name as counterpartyName
+        a.name as accountName, cp.name as counterpartyName
       FROM transaction_items ti
       LEFT JOIN accounts a ON ti.account_id = a.id
-      LEFT JOIN categories c ON ti.category_id = c.id
       LEFT JOIN counterparties cp ON ti.counterparty_id = cp.id
       WHERE ti.transaction_id IN (${placeholders})
     `).bind(...compoundIds).all<TransactionItem>();
 
     const itemsMap = new Map<string, TransactionItem[]>();
     for (const item of (itemsRes.results || [])) {
-      const list = itemsMap.get(item.transaction_id) || [];
+      const txId = (item as any).transactionId || (item as any).transaction_id;
+      const list = itemsMap.get(txId) || [];
       list.push(item);
-      itemsMap.set(item.transaction_id, list);
+      itemsMap.set(txId, list);
     }
 
     for (const tx of txList) {
       if (itemsMap.has(tx.id)) {
         tx.items = itemsMap.get(tx.id);
+        // اگر تراکنش چند مقصدی است و toAccountName خالی است، نام حساب‌های مقصد را الحاق کن
+        const destinations = tx.items?.filter(i => i.entryType === 'destination' && i.accountName);
+        if (!tx.toAccountName && destinations && destinations.length > 0) {
+          tx.toAccountName = destinations.map(d => d.accountName).join('، ');
+        }
+        // اگر تراکنش چند مبدایی است و fromAccountName خالی است
+        const sources = tx.items?.filter(i => i.entryType === 'source' && i.accountName);
+        if (!tx.fromAccountName && sources && sources.length > 0) {
+          tx.fromAccountName = sources.map(s => s.accountName).join('، ');
+        }
       }
     }
   }

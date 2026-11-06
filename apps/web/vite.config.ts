@@ -9,10 +9,12 @@ export default defineConfig({
   ],
   server: {
     port: 5173,
+    host: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:8787',
+        target: 'https://jibban-api.ajbv.ir',
         changeOrigin: true,
+        secure: false,
       },
     },
   },

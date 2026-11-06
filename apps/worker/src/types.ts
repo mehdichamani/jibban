@@ -81,45 +81,78 @@ export interface Counterparty {
 // ۴. اقلام اسناد مرکب / ریزآیتم‌های چندگانه (معادل MultiActivity پارمیس)
 export interface TransactionItem {
   id: string;
-  transaction_id: string;
-  user_id: string;
-  entry_type: 'source' | 'destination';
+  transactionId?: string;
+  transaction_id?: string;
+  userId?: string;
+  user_id?: string;
+  entryType?: 'source' | 'destination';
+  entry_type?: 'source' | 'destination';
+  accountId?: string | null;
   account_id?: string | null;
+  categoryId?: string | null;
   category_id?: string | null;
+  counterpartyId?: string | null;
   counterparty_id?: string | null;
   amount: number; // ریال
   description?: string | null;
+  createdAt?: string;
   created_at?: string;
   // فیلدهای نام الحاقی
+  accountName?: string;
   account_name?: string;
+  categoryName?: string;
   category_name?: string;
+  counterpartyName?: string;
   counterparty_name?: string;
 }
 
 // ۵. تراکنش‌ها و اسناد مالی (دفتر روزنامه)
 export interface Transaction {
   id: string;
-  user_id: string;
+  userId?: string;
+  user_id?: string;
+  fiscalYearId?: string | null;
   fiscal_year_id?: string | null;
   type: 'debit' | 'credit' | 'transfer' | 'compound';
   amount: number; // ریال
+  fromAccountId?: string | null;
   from_account_id?: string | null;
+  toAccountId?: string | null;
   to_account_id?: string | null;
+  categoryId?: string | null;
   category_id?: string | null;
+  counterpartyId?: string | null;
   counterparty_id?: string | null;
   description?: string;
   tag?: string;
+  rawSmsId?: string | null;
   raw_sms_id?: string | null;
-  transaction_date: string;
+  transactionDate?: string;
+  transaction_date?: string;
+  shamsiDate?: string;
   shamsi_date?: string;
   time?: string;
-  is_compound?: number;
+  isCompound?: number | boolean;
+  is_compound?: number | boolean;
   items?: TransactionItem[];
+  createdAt?: string;
   created_at?: string;
   // فیلدهای کمکی حاصل از Join
+  fromAccountName?: string;
   from_account_name?: string;
+  fromAccountColor?: string;
+  fromAccountIcon?: string;
+  fromAccountBankName?: string;
+  toAccountName?: string;
   to_account_name?: string;
+  toAccountColor?: string;
+  toAccountIcon?: string;
+  toAccountBankName?: string;
+  categoryName?: string;
   category_name?: string;
+  categoryIcon?: string;
+  categoryColor?: string;
+  counterpartyName?: string;
   counterparty_name?: string;
 }
 

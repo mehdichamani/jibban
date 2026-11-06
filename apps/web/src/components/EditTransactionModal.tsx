@@ -28,10 +28,18 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
 }) => {
   if (!isOpen || !transaction) return null;
 
+  const isCompound = transaction.isCompound || transaction.type === 'compound';
+  const compoundDestinations = transaction.items?.filter((i) => i.entryType === 'destination') || [];
+  const compoundSources = transaction.items?.filter((i) => i.entryType === 'source') || [];
+
   const [type, setType] = useState<'debit' | 'credit' | 'transfer' | 'compound'>(transaction.type);
   const [amount, setAmount] = useState<string>(String(Math.round(transaction.amount / 10))); // نمایش به تومان
-  const [fromAccountId, setFromAccountId] = useState<string>(transaction.fromAccountId || '');
-  const [toAccountId, setToAccountId] = useState<string>(transaction.toAccountId || '');
+  const [fromAccountId, setFromAccountId] = useState<string>(
+    transaction.fromAccountId || compoundSources[0]?.accountId || ''
+  );
+  const [toAccountId, setToAccountId] = useState<string>(
+    transaction.toAccountId || compoundDestinations[0]?.accountId || ''
+  );
   const [description, setDescription] = useState<string>(transaction.description || '');
   const [transactionDate, setTransactionDate] = useState<string>(transaction.transactionDate);
   const [shamsiDate, setShamsiDate] = useState<string>(transaction.shamsiDate || '');
@@ -188,17 +196,40 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
             </select>
           </div>
 
+          {/* اگر سند چند حسابی است، نمایش ریز اقلام مقصد */}
+          {isCompound && compoundDestinations.length > 0 && (
+            <div className="p-3 bg-purple-950/30 border border-purple-800/50 rounded-xl space-y-2">
+              <span className="text-xs font-bold text-purple-300 block">
+                حساب‌های مقصد این سند مرکب ({compoundDestinations.length} ردیف هزینه):
+              </span>
+              <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                {compoundDestinations.map((it) => (
+                  <div key={it.id} className="flex items-center justify-between text-xs py-1 px-2 bg-slate-900/60 rounded-lg border border-purple-900/30">
+                    <span className="text-slate-200 font-medium">
+                      • {it.accountName || it.description || 'ردیف هزینه'}
+                    </span>
+                    <span className="font-mono text-purple-300 font-bold">
+                      {Math.round(it.amount / 10).toLocaleString()} تومان
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* حساب مقصد */}
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1.5">
-              به حساب (حساب مقصد / بابت / هزینه)
+              {isCompound ? 'تغییر یا انتساب حساب مقصد اصلی:' : 'به حساب (حساب مقصد / بابت / هزینه):'}
             </label>
             <select
               value={toAccountId}
               onChange={(e) => setToAccountId(e.target.value)}
               className="w-full bg-slate-900/80 border border-slate-700/80 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none focus:border-sky-500 transition"
             >
-              <option value="">بدون حساب مقصد (یا انتخاب کنید)...</option>
+              <option value="">
+                {isCompound ? '(چند حساب مقصد در جدول بالا ثبت شده است)' : 'بدون حساب مقصد (یا انتخاب کنید)...'}
+              </option>
               {destAccounts.map((acc) => (
                 <option key={acc.id} value={acc.id}>
                   {acc.name} ({acc.type === 'expense' ? 'هزینه' : acc.type === 'bank' ? 'بانک' : acc.type})
