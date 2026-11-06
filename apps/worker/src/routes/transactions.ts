@@ -19,7 +19,7 @@ transactionsRouter.get('/', async (c) => {
   const tag = c.req.query('tag');
   const startDate = c.req.query('startDate');
   const endDate = c.req.query('endDate');
-  const limit = Math.min(500, parseInt(c.req.query('limit') || '100', 10));
+  const limit = Math.min(1000, parseInt(c.req.query('limit') || '1000', 10));
   const offset = parseInt(c.req.query('offset') || '0', 10);
 
   let query = `
@@ -135,7 +135,7 @@ transactionsRouter.get('/', async (c) => {
 transactionsRouter.post('/', async (c) => {
   const userId = c.get('userId');
   const body = await c.req.json<{
-    amount: number; // جمع کل سند به ریال
+    amount: number;
     type: 'debit' | 'credit' | 'transfer' | 'compound';
     fiscalYearId?: string | null;
     fromAccountId?: string | null;
@@ -172,18 +172,16 @@ transactionsRouter.post('/', async (c) => {
   const counterpartyId = body.counterpartyId ?? null;
   const isCompound = (body.items && body.items.length > 0) || body.type === 'compound' ? 1 : 0;
 
-  // دوره مالی پیش‌فرض اگر ارسال نشده بود
   let fiscalYearId = body.fiscalYearId ?? null;
   if (!fiscalYearId) {
     const activeFy = await c.env.DB.prepare('SELECT id FROM fiscal_years WHERE user_id = ? AND is_active = 1 LIMIT 1')
       .bind(userId)
       .first<{ id: string }>();
-    fiscalYearId = activeFy?.id ?? 'fiscal_1405';
+    fiscalYearId = activeFy?.id ?? 'fiscal_3';
   }
 
   const statements: D1PreparedStatement[] = [];
 
-  // ۱. ثبت سربرگ سند در جدول transactions
   statements.push(
     c.env.DB.prepare(
       `INSERT INTO transactions (
@@ -211,7 +209,6 @@ transactionsRouter.post('/', async (c) => {
     )
   );
 
-  // ۲. در صورتی که تراکنش مرکب (چند مبدا یا چند مقصد) باشد:
   if (isCompound && body.items && body.items.length > 0) {
     for (const it of body.items) {
       const itId = `txi_${crypto.randomUUID()}`;
@@ -234,16 +231,13 @@ transactionsRouter.post('/', async (c) => {
         )
       );
 
-      // بروزرسانی مانده حساب‌ها بر اساس نوع آیتم
       if (it.accountId) {
         if (it.entryType === 'source') {
-          // مبدا پرداخت: کاهش مانده
           statements.push(
             c.env.DB.prepare('UPDATE accounts SET balance = balance - ? WHERE id = ? AND user_id = ?')
               .bind(itAmt, it.accountId, userId)
           );
         } else {
-          // مقصد پرداخت: افزایش مانده
           statements.push(
             c.env.DB.prepare('UPDATE accounts SET balance = balance + ? WHERE id = ? AND user_id = ?')
               .bind(itAmt, it.accountId, userId)
@@ -251,7 +245,6 @@ transactionsRouter.post('/', async (c) => {
         }
       }
 
-      // بروزرسانی مانده طرف‌حساب
       if (it.counterpartyId) {
         const cpDelta = it.entryType === 'destination' ? itAmt : -itAmt;
         statements.push(
@@ -261,7 +254,6 @@ transactionsRouter.post('/', async (c) => {
       }
     }
   } else {
-    // ۳. حالت تک‌مبدا / تک‌مقصد معمولی:
     if (fromAccountId && (body.type === 'debit' || body.type === 'transfer')) {
       statements.push(
         c.env.DB.prepare('UPDATE accounts SET balance = balance - ? WHERE id = ? AND user_id = ?')
@@ -311,6 +303,136 @@ transactionsRouter.post('/', async (c) => {
 });
 
 /**
+ * ویرایش / اصلاح تراکنش مالی (تک‌مبدا، تک‌مقصد یا مرکب)
+ */
+transactionsRouter.put('/:id', async (c) => {
+  const id = c.req.param('id');
+  const userId = c.get('userId');
+  const body = await c.req.json<{
+    amount?: number;
+    type?: 'debit' | 'credit' | 'transfer' | 'compound';
+    fromAccountId?: string | null;
+    toAccountId?: string | null;
+    categoryId?: string | null;
+    counterpartyId?: string | null;
+    description?: string | null;
+    tag?: string | null;
+    transactionDate?: string;
+    shamsiDate?: string | null;
+  }>();
+
+  const oldTx = await c.env.DB.prepare('SELECT * FROM transactions WHERE id = ? AND user_id = ?')
+    .bind(id, userId)
+    .first<any>();
+
+  if (!oldTx) {
+    return c.json({ success: false, error: 'تراکنش پیدا نشد' }, 404);
+  }
+
+  const revertStatements: D1PreparedStatement[] = [];
+
+  // برگشت اثر مالی قدیمی
+  if (oldTx.from_account_id && (oldTx.type === 'debit' || oldTx.type === 'transfer')) {
+    revertStatements.push(
+      c.env.DB.prepare('UPDATE accounts SET balance = balance + ? WHERE id = ? AND user_id = ?')
+        .bind(oldTx.amount, oldTx.from_account_id, userId)
+    );
+  }
+  if (oldTx.to_account_id && (oldTx.type === 'credit' || oldTx.type === 'transfer')) {
+    revertStatements.push(
+      c.env.DB.prepare('UPDATE accounts SET balance = balance - ? WHERE id = ? AND user_id = ?')
+        .bind(oldTx.amount, oldTx.to_account_id, userId)
+    );
+  }
+  if (oldTx.counterparty_id) {
+    const cpDelta = oldTx.type === 'debit' ? -oldTx.amount : oldTx.type === 'credit' ? oldTx.amount : 0;
+    if (cpDelta !== 0) {
+      revertStatements.push(
+        c.env.DB.prepare('UPDATE counterparties SET balance = balance + ? WHERE id = ? AND user_id = ?')
+          .bind(cpDelta, oldTx.counterparty_id, userId)
+      );
+    }
+  }
+
+  // داده‌های جدید
+  const newAmount = body.amount !== undefined ? Math.round(body.amount) : oldTx.amount;
+  const newType = body.type ?? oldTx.type;
+  const newFromAcc = body.fromAccountId !== undefined ? body.fromAccountId : oldTx.from_account_id;
+  const newToAcc = body.toAccountId !== undefined ? body.toAccountId : oldTx.to_account_id;
+  const newCat = body.categoryId !== undefined ? body.categoryId : oldTx.category_id;
+  const newCp = body.counterpartyId !== undefined ? body.counterpartyId : oldTx.counterparty_id;
+  const newDesc = body.description !== undefined ? body.description : oldTx.description;
+  const newTag = body.tag !== undefined ? body.tag : oldTx.tag;
+  const newDate = body.transactionDate ?? oldTx.transaction_date;
+  const newShamsi = body.shamsiDate !== undefined ? body.shamsiDate : oldTx.shamsi_date;
+
+  revertStatements.push(
+    c.env.DB.prepare(
+      `UPDATE transactions SET 
+        amount = ?, type = ?, from_account_id = ?, to_account_id = ?,
+        category_id = ?, counterparty_id = ?, description = ?, tag = ?,
+        transaction_date = ?, shamsi_date = ?
+       WHERE id = ? AND user_id = ?`
+    ).bind(
+      newAmount,
+      newType,
+      newFromAcc,
+      newToAcc,
+      newCat,
+      newCp,
+      newDesc,
+      newTag,
+      newDate,
+      newShamsi,
+      id,
+      userId
+    )
+  );
+
+  // اعمال اثر مالی جدید
+  if (newFromAcc && (newType === 'debit' || newType === 'transfer')) {
+    revertStatements.push(
+      c.env.DB.prepare('UPDATE accounts SET balance = balance - ? WHERE id = ? AND user_id = ?')
+        .bind(newAmount, newFromAcc, userId)
+    );
+  }
+  if (newToAcc && (newType === 'credit' || newType === 'transfer')) {
+    revertStatements.push(
+      c.env.DB.prepare('UPDATE accounts SET balance = balance + ? WHERE id = ? AND user_id = ?')
+        .bind(newAmount, newToAcc, userId)
+    );
+  }
+  if (newCp) {
+    const cpDelta = newType === 'debit' ? newAmount : newType === 'credit' ? -newAmount : 0;
+    if (cpDelta !== 0) {
+      revertStatements.push(
+        c.env.DB.prepare('UPDATE counterparties SET balance = balance + ? WHERE id = ? AND user_id = ?')
+          .bind(cpDelta, newCp, userId)
+      );
+    }
+  }
+
+  await c.env.DB.batch(revertStatements);
+
+  return c.json({
+    success: true,
+    data: {
+      id,
+      amount: newAmount,
+      type: newType,
+      fromAccountId: newFromAcc,
+      toAccountId: newToAcc,
+      categoryId: newCat,
+      counterpartyId: newCp,
+      description: newDesc,
+      tag: newTag,
+      transactionDate: newDate,
+      shamsiDate: newShamsi,
+    },
+  });
+});
+
+/**
  * دریافت جزئیات یک تراکنش همراه با ریز اقلام
  */
 transactionsRouter.get('/:id', async (c) => {
@@ -338,7 +460,6 @@ transactionsRouter.get('/:id', async (c) => {
     return c.json({ success: false, error: 'تراکنش پیدا نشد' }, 404);
   }
 
-  // دریافت اقلام سند در صورت وجود
   const items = await c.env.DB.prepare(`
     SELECT 
       ti.id, ti.transaction_id as transactionId, ti.user_id as userId,
@@ -377,7 +498,6 @@ transactionsRouter.delete('/:id', async (c) => {
 
   const statements: D1PreparedStatement[] = [];
 
-  // بررسی اقلام مرکب
   const items = await c.env.DB.prepare('SELECT * FROM transaction_items WHERE transaction_id = ?')
     .bind(id)
     .all<any>();
@@ -386,13 +506,11 @@ transactionsRouter.delete('/:id', async (c) => {
     for (const it of items.results) {
       if (it.account_id) {
         if (it.entry_type === 'source') {
-          // بازگرداندن وجه به حساب مبدا (+)
           statements.push(
             c.env.DB.prepare('UPDATE accounts SET balance = balance + ? WHERE id = ? AND user_id = ?')
               .bind(it.amount, it.account_id, userId)
           );
         } else {
-          // کسر وجه از حساب مقصد (-)
           statements.push(
             c.env.DB.prepare('UPDATE accounts SET balance = balance - ? WHERE id = ? AND user_id = ?')
               .bind(it.amount, it.account_id, userId)
@@ -409,7 +527,6 @@ transactionsRouter.delete('/:id', async (c) => {
     }
     statements.push(c.env.DB.prepare('DELETE FROM transaction_items WHERE transaction_id = ?').bind(id));
   } else {
-    // بازگردانی حالت ساده
     if (tx.from_account_id && (tx.type === 'debit' || tx.type === 'transfer')) {
       statements.push(
         c.env.DB.prepare('UPDATE accounts SET balance = balance + ? WHERE id = ? AND user_id = ?')

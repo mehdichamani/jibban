@@ -31,60 +31,19 @@ interface SplitwiseTabProps {
 
 const STORAGE_KEY_GROUP_EXPENSES = 'jibban_local_group_expenses';
 
-// هزینه‌های پایه اولیه گروه با تاریخ‌های استاندارد
-const DEFAULT_EXPENSES: GroupExpenseRecord[] = [
-  {
-    id: 'exp_init_1',
-    payerName: 'من',
-    description: 'خرید مواد غذایی سوپرمارکت',
-    amount: 340000,
-    date: new Date(Date.now() - 3600000 * 3).toISOString(),
-    splitType: 'equal',
-    splits: [
-      { userId: 'من', owedAmount: 113334 },
-      { userId: 'رضا', owedAmount: 113333 },
-      { userId: 'سارا', owedAmount: 113333 },
-    ],
-  },
-  {
-    id: 'exp_init_2',
-    payerName: 'رضا',
-    description: 'اسنپ و حمل و نقل گروهی',
-    amount: 120000,
-    date: new Date(Date.now() - 3600000 * 24).toISOString(),
-    splitType: 'percentage',
-    splits: [
-      { userId: 'من', owedAmount: 60000, percentage: 50 },
-      { userId: 'رضا', owedAmount: 36000, percentage: 30 },
-      { userId: 'سارا', owedAmount: 24000, percentage: 20 },
-    ],
-  },
-  {
-    id: 'exp_init_3',
-    payerName: 'من',
-    description: 'کافه و عصرانه',
-    amount: 110000,
-    date: new Date(Date.now() - 3600000 * 48).toISOString(),
-    splitType: 'equal',
-    splits: [
-      { userId: 'من', owedAmount: 36668 },
-      { userId: 'رضا', owedAmount: 36666 },
-      { userId: 'سارا', owedAmount: 36666 },
-    ],
-  },
-];
+// هزینه‌های پایه اولیه خالی
+const DEFAULT_EXPENSES: GroupExpenseRecord[] = [];
 
 export const SplitwiseTab: React.FC<SplitwiseTabProps> = ({ onOpenAddExpense }) => {
   const [expenses, setExpenses] = useState<GroupExpenseRecord[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEY_GROUP_EXPENSES);
     if (!saved) {
-      localStorage.setItem(STORAGE_KEY_GROUP_EXPENSES, JSON.stringify(DEFAULT_EXPENSES));
-      return DEFAULT_EXPENSES;
+      return [];
     }
     try {
       return JSON.parse(saved);
     } catch {
-      return DEFAULT_EXPENSES;
+      return [];
     }
   });
 

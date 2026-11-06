@@ -13,6 +13,7 @@ import { ToSplitModal } from './components/ToSplitModal.js';
 import { AddExpenseModal, NewGroupExpenseData } from './components/AddExpenseModal.js';
 import { GroupExpenseRecord } from './components/SplitwiseTab.js';
 import { AddTransactionModal } from './components/AddTransactionModal.js';
+import { EditTransactionModal } from './components/EditTransactionModal.js';
 import { CheckCircle2 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -26,6 +27,7 @@ export const App: React.FC = () => {
   // وضعیت‌های مودال
   const [isSimulatorOpen, setIsSimulatorOpen] = useState<boolean>(false);
   const [splitModalTx, setSplitModalTx] = useState<Transaction | null>(null);
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState<boolean>(false);
   const [isAddTxOpen, setIsAddTxOpen] = useState<boolean>(false);
 
@@ -77,6 +79,30 @@ export const App: React.FC = () => {
 
     const typeLabel = data.type === 'debit' ? 'هزینه' : data.type === 'credit' ? 'درآمد' : 'انتقال بین‌حسابی';
     showToast(`تراکنش ${typeLabel} به مبلغ ${new Intl.NumberFormat('fa-IR').format(data.amount)} ت ثبت شد.`);
+  };
+
+  // ویرایش و اصلاح تراکنش
+  const handleUpdateTransaction = async (
+    id: string,
+    data: {
+      amount: number;
+      type: 'debit' | 'credit' | 'transfer' | 'compound';
+      fromAccountId?: string | null;
+      toAccountId?: string | null;
+      categoryId?: string | null;
+      counterpartyId?: string | null;
+      description?: string;
+      transactionDate?: string;
+      shamsiDate?: string;
+    }
+  ) => {
+    const success = await api.updateTransaction(id, data);
+    if (success) {
+      await loadData();
+      showToast('تراکنش با موفقیت اصلاح و مانده حساب‌ها بروزرسانی شد.');
+    } else {
+      showToast('خطا در ذخیره تغییرات تراکنش.');
+    }
   };
 
   // حذف تراکنش
@@ -212,6 +238,7 @@ export const App: React.FC = () => {
               selectedAccountId={selectedAccountId}
               onSelectAccount={setSelectedAccountId}
               onOpenAddModal={() => setIsAddTxOpen(true)}
+              onOpenEditModal={(tx) => setEditingTx(tx)}
               onOpenSplitModal={(tx) => setSplitModalTx(tx)}
               onDeleteTransaction={handleDeleteTransaction}
             />
@@ -250,6 +277,16 @@ export const App: React.FC = () => {
         accounts={accounts}
         categories={categories}
         onAddTransaction={handleAddTransaction}
+      />
+
+      {/* مودال ویرایش و اصلاح تراکنش */}
+      <EditTransactionModal
+        isOpen={Boolean(editingTx)}
+        onClose={() => setEditingTx(null)}
+        transaction={editingTx}
+        accounts={accounts}
+        categories={categories}
+        onUpdateTransaction={handleUpdateTransaction}
       />
 
       {/* مودال شبیه‌ساز پیامک بانکی */}
