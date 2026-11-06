@@ -9,6 +9,7 @@ import { categoriesRouter } from './routes/categories.js';
 import { accountsRouter } from './routes/accounts.js';
 import { loansRouter } from './routes/loans.js';
 import { counterpartiesRouter } from './routes/counterparties.js';
+import { fiscalYearsRouter } from './routes/fiscal-years.js';
 import { ensureInitialSeed } from './db/seed.js';
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -75,6 +76,7 @@ app.route('/api/categories', categoriesRouter);
 app.route('/api/accounts', accountsRouter);
 app.route('/api/loans', loansRouter);
 app.route('/api/counterparties', counterpartiesRouter);
+app.route('/api/fiscal-years', fiscalYearsRouter);
 
 // ۷. صفحه اصلی
 app.get('/', (c) => {

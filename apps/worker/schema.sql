@@ -1,5 +1,5 @@
--- اسکیماهای رسمی پایگاه داده رابطه‌ای جیب‌بان (JibBan D1 Database 2.0)
--- معماری بر پایه دقت محاسباتی ریال، ساختار درختی و سیستم دنگ یکپارچه
+-- اسکیماهای رسمی پایگاه داده رابطه‌ای جیب‌بان (JibBan D1 Database 2.5 - دفتر روزنامه دوبل به سبک پارمیس)
+-- مجهز به پشتیبانی کامل از سال‌های مالی (Fiscal Years)، اسناد چند مبدا و چند مقصد (Multi-entry Activity) و دقت ریالی
 
 -- ۱. کاربران سیستم
 CREATE TABLE IF NOT EXISTS users (
@@ -10,11 +10,25 @@ CREATE TABLE IF NOT EXISTS users (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- ۲. حساب‌های دارایی، نقد و بانک (Asset & Bank Accounts)
+-- ۲. سال‌ها و دوره‌های مالی (Fiscal Years - منطبق با پارمیس)
+CREATE TABLE IF NOT EXISTS fiscal_years (
+    id TEXT PRIMARY KEY,               -- مثلاً: fiscal_1405, fiscal_1404
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,                -- نام دوره: ۱۴۰۵، ۱۴۰۴
+    begin_date TEXT NOT NULL,          -- شروع دوره (مثلاً: 1405/01/01)
+    end_date TEXT NOT NULL,            -- پایان دوره (مثلاً: 1405/12/29)
+    status TEXT CHECK(status IN ('open', 'closed')) DEFAULT 'open',
+    is_active BOOLEAN DEFAULT 1,       -- دوره فعال جاری
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_fiscal_years_user ON fiscal_years(user_id);
+
+-- ۳. حساب‌های دارایی، نقد و بانک (Asset & Bank Accounts)
 CREATE TABLE IF NOT EXISTS accounts (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
-    name TEXT NOT NULL,                -- مثلاً: تجارت، بلوبانک، کیف پول نقد
+    name TEXT NOT NULL,                -- مثلاً: بلوبانک، پاسارگاد، کیف پول
     type TEXT CHECK(type IN ('bank', 'wallet', 'savings', 'credit', 'debt')) DEFAULT 'bank',
     bank_name TEXT,                    -- نام بانک (تجارت، سامان، ملی، بلو، ویپاد و...)
     account_number TEXT,               -- شماره حساب
@@ -30,7 +44,21 @@ CREATE TABLE IF NOT EXISTS accounts (
 );
 CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id);
 
--- ۳. دسته‌بندی‌های درختی درآمد و هزینه (Hierarchical Categories)
+-- ۴. مانده اول دوره حساب‌ها به تفکیک سال مالی (RemainedAccount - مشابه پارمیس)
+CREATE TABLE IF NOT EXISTS fiscal_remained_accounts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    fiscal_year_id TEXT NOT NULL,
+    remained INTEGER NOT NULL DEFAULT 0, -- مانده انتقال یافته به ریال
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id),
+    FOREIGN KEY(account_id) REFERENCES accounts(id),
+    FOREIGN KEY(fiscal_year_id) REFERENCES fiscal_years(id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fiscal_remained_acc ON fiscal_remained_accounts(account_id, fiscal_year_id);
+
+-- ۵. دسته‌بندی‌های درختی درآمد و هزینه (Hierarchical Categories)
 CREATE TABLE IF NOT EXISTS categories (
     id TEXT PRIMARY KEY,
     user_id TEXT,                      -- تهی برای دسته‌بندی‌های سیستمی و پایه
@@ -46,7 +74,7 @@ CREATE TABLE IF NOT EXISTS categories (
 CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
 CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id);
 
--- ۴. اشخاص و طرف‌حساب‌ها (Counterparties - متصل به سیستم دنگ)
+-- ۶. اشخاص و طرف‌حساب‌ها (Counterparties)
 CREATE TABLE IF NOT EXISTS counterparties (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -59,9 +87,9 @@ CREATE TABLE IF NOT EXISTS counterparties (
 );
 CREATE INDEX IF NOT EXISTS idx_counterparties_user ON counterparties(user_id);
 
--- ۵. پیامک‌های خام بانکی (Raw SMS Archive)
+-- ۷. پیامک‌های خام بانکی (Raw SMS Archive)
 CREATE TABLE IF NOT EXISTS raw_sms (
-    id TEXT PRIMARY KEY,               -- شناسه یکتا یا هش پیامک
+    id TEXT PRIMARY KEY,
     sms_hash TEXT UNIQUE NOT NULL,
     user_id TEXT NOT NULL,
     sender TEXT,
@@ -78,23 +106,27 @@ CREATE TABLE IF NOT EXISTS raw_sms (
 CREATE INDEX IF NOT EXISTS idx_raw_sms_hash ON raw_sms(sms_hash);
 CREATE INDEX IF NOT EXISTS idx_raw_sms_user ON raw_sms(user_id);
 
--- ۶. تراکنش‌های مالی جامع (Transactions)
+-- ۸. سربرگ اسناد و تراکنش‌های مالی (Transactions / Activities Header)
 CREATE TABLE IF NOT EXISTS transactions (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
-    type TEXT CHECK(type IN ('debit', 'credit', 'transfer')) NOT NULL, -- برداشت (هزینه)، واریز (درآمد)، انتقال بین‌بانکی
-    amount INTEGER NOT NULL,           -- همیشه به ریال
-    from_account_id TEXT,              -- حساب پرداخت‌کننده (مبدا)
-    to_account_id TEXT,                -- حساب دریافت‌کننده (مقصد)
-    category_id TEXT,                  -- سرفصل هزینه یا درآمد
+    fiscal_year_id TEXT,               -- دوره مالی مرتبط (مثلاً: fiscal_1405)
+    type TEXT CHECK(type IN ('debit', 'credit', 'transfer', 'compound')) NOT NULL,
+    amount INTEGER NOT NULL,           -- جمع کل سند به ریال
+    from_account_id TEXT,              -- برای تراکنش‌های ساده تک‌مبدا
+    to_account_id TEXT,                -- برای تراکنش‌های ساده تک‌مقصد
+    category_id TEXT,                  -- برای تراکنش‌های تک‌دسته‌ای
     counterparty_id TEXT,              -- شخص مرتبط
-    description TEXT,                  -- شرح و بابت
-    tag TEXT,                          -- برچسب (مثلاً: دنگ، سفر، خرید خانه)
+    description TEXT,                  -- شرح و بابت سند
+    tag TEXT,                          -- برچسب
     raw_sms_id TEXT,                   -- ارجاع به پیامک متناظر
-    transaction_date DATETIME NOT NULL,-- تاریخ و ساعت استاندارد UTC
-    shamsi_date TEXT,                  -- تاریخ شمسی رشته‌ای (مثلاً: 1405/08/07)
+    transaction_date DATETIME NOT NULL,-- تاریخ و زمان استاندارد
+    shamsi_date TEXT,                  -- تاریخ شمسی رشته‌ای (1405/08/14)
+    time TEXT DEFAULT '12:00:00',      -- ساعت تراکنش
+    is_compound BOOLEAN DEFAULT 0,     -- آیا تراکنش مرکب (چند مبدا یا چند مقصد) است؟
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES users(id),
+    FOREIGN KEY(fiscal_year_id) REFERENCES fiscal_years(id),
     FOREIGN KEY(from_account_id) REFERENCES accounts(id),
     FOREIGN KEY(to_account_id) REFERENCES accounts(id),
     FOREIGN KEY(category_id) REFERENCES categories(id),
@@ -102,20 +134,42 @@ CREATE TABLE IF NOT EXISTS transactions (
     FOREIGN KEY(raw_sms_id) REFERENCES raw_sms(id)
 );
 CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_id, transaction_date);
+CREATE INDEX IF NOT EXISTS idx_transactions_fiscal ON transactions(fiscal_year_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_from_acc ON transactions(from_account_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_to_acc ON transactions(to_account_id);
 
--- ۷. وام‌ها و تسهیلات (Loans & Borrowings)
+-- ۹. ردیف‌های اسناد مرکب / ریزآیتم‌های چندگانه (Transaction Items - معادل MultiActivity پارمیس)
+CREATE TABLE IF NOT EXISTS transaction_items (
+    id TEXT PRIMARY KEY,
+    transaction_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    entry_type TEXT CHECK(entry_type IN ('source', 'destination')) NOT NULL, -- منبع (مبدا/برداشت) یا مقصد (هزینه/واریز)
+    account_id TEXT,                   -- در صورتی که آیتم حساب بانکی/کیف‌پول باشد
+    category_id TEXT,                  -- در صورتی که آیتم دسته‌بندی هزینه/درآمد باشد
+    counterparty_id TEXT,              -- در صورتی که آیتم مربوط به شخص باشد
+    amount INTEGER NOT NULL,           -- مبلغ این ردیف به ریال
+    description TEXT,                  -- شرح ردیف
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
+    FOREIGN KEY(user_id) REFERENCES users(id),
+    FOREIGN KEY(account_id) REFERENCES accounts(id),
+    FOREIGN KEY(category_id) REFERENCES categories(id),
+    FOREIGN KEY(counterparty_id) REFERENCES counterparties(id)
+);
+CREATE INDEX IF NOT EXISTS idx_tx_items_transaction ON transaction_items(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_tx_items_account ON transaction_items(account_id);
+
+-- ۱۰. وام‌ها و تسهیلات (Loans & Borrowings)
 CREATE TABLE IF NOT EXISTS loans (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
-    title TEXT NOT NULL,               -- مثلاً: پشتوانه ویپاد، وام ازکی‌وام
-    account_id TEXT,                   -- حسابی که اقساط از آن کسر می‌شود
+    title TEXT NOT NULL,
+    account_id TEXT,
     total_amount INTEGER NOT NULL,     -- مبلغ اصل وام به ریال
     total_profit INTEGER DEFAULT 0,    -- مبلغ سود به ریال
     installment_amount INTEGER NOT NULL, -- مبلغ هر قسط به ریال
-    total_installments INTEGER NOT NULL, -- تعداد اقساط
-    paid_installments INTEGER DEFAULT 0, -- تعداد اقساط پرداخت شده
+    total_installments INTEGER NOT NULL,
+    paid_installments INTEGER DEFAULT 0,
     start_date DATETIME NOT NULL,
     status TEXT CHECK(status IN ('active', 'completed', 'overdue')) DEFAULT 'active',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -124,7 +178,7 @@ CREATE TABLE IF NOT EXISTS loans (
 );
 CREATE INDEX IF NOT EXISTS idx_loans_user ON loans(user_id);
 
--- ۸. ریز اقساط وام‌ها (Loan Installments)
+-- ۱۱. ریز اقساط وام‌ها (Loan Installments)
 CREATE TABLE IF NOT EXISTS loan_installments (
     id TEXT PRIMARY KEY,
     loan_id TEXT NOT NULL,
@@ -139,7 +193,7 @@ CREATE TABLE IF NOT EXISTS loan_installments (
 );
 CREATE INDEX IF NOT EXISTS idx_installments_loan ON loan_installments(loan_id);
 
--- ۹. بودجه‌بندی ماهانه (Monthly Budgets)
+-- ۱۲. بودجه‌بندی ماهانه (Monthly Budgets)
 CREATE TABLE IF NOT EXISTS budgets (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -152,7 +206,7 @@ CREATE TABLE IF NOT EXISTS budgets (
 );
 CREATE INDEX IF NOT EXISTS idx_budgets_user_month ON budgets(user_id, shamsi_month);
 
--- ۱۰. گروه‌های دنگ و تسهیم مخارج (Splitwise Engine)
+-- ۱۳. گروه‌های دنگ و تسهیم مخارج (Splitwise Engine)
 CREATE TABLE IF NOT EXISTS groups (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,

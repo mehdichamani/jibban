@@ -1,5 +1,5 @@
 /**
- * تعاریف بایندینگ‌ها و تایپ‌های سرورلس Cloudflare Worker در Hono (JibBan 2.0)
+ * تعاریف بایندینگ‌ها و تایپ‌های سرورلس Cloudflare Worker در Hono (JibBan 2.5 - دفتر روزنامه به سبک پارمیس)
  */
 
 export type Bindings = {
@@ -22,6 +22,18 @@ export interface ApiResponse<T = unknown> {
   data?: T;
   error?: string;
   message?: string;
+}
+
+// ۰. سال‌های مالی (Fiscal Years)
+export interface FiscalYear {
+  id: string;
+  user_id: string;
+  name: string;
+  begin_date: string;
+  end_date: string;
+  status: 'open' | 'closed';
+  is_active: number;
+  created_at?: string;
 }
 
 // ۱. حساب‌های مالی (مبالغ به ریال)
@@ -66,11 +78,30 @@ export interface Counterparty {
   created_at?: string;
 }
 
-// ۴. تراکنش‌های مالی
+// ۴. اقلام اسناد مرکب / ریزآیتم‌های چندگانه (معادل MultiActivity پارمیس)
+export interface TransactionItem {
+  id: string;
+  transaction_id: string;
+  user_id: string;
+  entry_type: 'source' | 'destination';
+  account_id?: string | null;
+  category_id?: string | null;
+  counterparty_id?: string | null;
+  amount: number; // ریال
+  description?: string | null;
+  created_at?: string;
+  // فیلدهای نام الحاقی
+  account_name?: string;
+  category_name?: string;
+  counterparty_name?: string;
+}
+
+// ۵. تراکنش‌ها و اسناد مالی (دفتر روزنامه)
 export interface Transaction {
   id: string;
   user_id: string;
-  type: 'debit' | 'credit' | 'transfer';
+  fiscal_year_id?: string | null;
+  type: 'debit' | 'credit' | 'transfer' | 'compound';
   amount: number; // ریال
   from_account_id?: string | null;
   to_account_id?: string | null;
@@ -81,6 +112,9 @@ export interface Transaction {
   raw_sms_id?: string | null;
   transaction_date: string;
   shamsi_date?: string;
+  time?: string;
+  is_compound?: number;
+  items?: TransactionItem[];
   created_at?: string;
   // فیلدهای کمکی حاصل از Join
   from_account_name?: string;
@@ -89,7 +123,7 @@ export interface Transaction {
   counterparty_name?: string;
 }
 
-// ۵. وام‌ها و اقساط
+// ۶. وام‌ها و اقساط
 export interface Loan {
   id: string;
   user_id: string;
@@ -117,7 +151,7 @@ export interface LoanInstallment {
   linked_transaction_id?: string | null;
 }
 
-// ۶. پیامک‌های خام بانکی
+// ۷. پیامک‌های خام بانکی
 export interface RawSms {
   id: string;
   sms_hash: string;
