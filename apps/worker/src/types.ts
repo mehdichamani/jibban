@@ -4,6 +4,7 @@
 
 export type Bindings = {
   DB: D1Database;
+  SPLIT_DB?: D1Database;
   KV: KVNamespace;
   ENVIRONMENT?: string;
 };
@@ -40,8 +41,9 @@ export interface FiscalYear {
 export interface Account {
   id: string;
   user_id: string;
+  parent_id?: string | null;
   name: string;
-  type: 'bank' | 'wallet' | 'savings' | 'credit' | 'debt';
+  type: 'bank' | 'wallet' | 'savings' | 'credit' | 'debt' | 'expense' | 'income';
   bank_name?: string;
   account_number?: string;
   card_number?: string;
@@ -194,7 +196,7 @@ export interface RawSms {
   bank_name?: string;
   parsed_amount?: number; // ریال
   parsed_account?: string;
-  status: 'processed' | 'ignored' | 'manual';
+  status: 'pending' | 'processed' | 'ignored' | 'manual';
   transaction_id?: string;
   received_at?: string;
   created_at?: string;

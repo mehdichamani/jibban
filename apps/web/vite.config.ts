@@ -12,7 +12,7 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: 'https://jibban-api.ajbv.ir',
+        target: 'http://127.0.0.1:8787',
         changeOrigin: true,
         secure: false,
       },

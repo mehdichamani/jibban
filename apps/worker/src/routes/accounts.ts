@@ -1,282 +1,325 @@
 import { Hono } from 'hono';
-import { Bindings, Variables, Account } from '../types.js';
+import { Bindings, Variables } from '../types.js';
 
 export const accountsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 /**
- * دریافت لیست تمام حساب‌های کاربر
+ * تعیین نوع حساب بر اساس ریشه درختی پارمیس
+ */
+function resolveAccountType(rootId: number): 'expense' | 'income' | 'wallet' | 'bank' | 'debt' | 'savings' {
+  switch (rootId) {
+    case 1:
+      return 'expense';
+    case 2:
+      return 'income';
+    case 3:
+      return 'wallet';
+    case 4:
+      return 'bank';
+    case 5:
+    case 8:
+    case 161:
+      return 'debt';
+    case 7:
+    case 162:
+      return 'savings';
+    default:
+      return 'bank';
+  }
+}
+
+/**
+ * نقشه رنگ و آیکون برای انواع حساب
+ */
+function resolveAccountStyling(type: string, rootId: number) {
+  switch (rootId) {
+    case 1:
+      return { color: '#ef4444', icon: 'shopping-bag' };
+    case 2:
+      return { color: '#22c55e', icon: 'trending-up' };
+    case 3:
+      return { color: '#f59e0b', icon: 'wallet' };
+    case 4:
+      return { color: '#0284c7', icon: 'credit-card' };
+    case 161:
+      return { color: '#8b5cf6', icon: 'users' };
+    case 7:
+    case 162:
+      return { color: '#10b981', icon: 'piggy-bank' };
+    case 8:
+      return { color: '#ec4899', icon: 'alert-circle' };
+    default:
+      return { color: '#64748b', icon: 'folder' };
+  }
+}
+
+/**
+ * دریافت لیست تمام حساب‌های کاربر مستقیماً از جدول بومی پارمیس (accounts)
  */
 accountsRouter.get('/', async (c) => {
-  const userId = c.get('userId');
-  const type = c.req.query('type');
-  const includeArchived = c.req.query('includeArchived') === 'true';
+  const typeFilter = c.req.query('type');
+  const asTree = c.req.query('tree') === 'true';
 
-  let query = `
+  // کوئری CTE برای استخراج حساب‌ها به همراه root_id ریشه
+  const query = `
+    WITH RECURSIVE hier(id, parent, root) AS (
+      SELECT Ac_id, Ac_parent_id, Ac_id FROM accounts WHERE Ac_parent_id = 0
+      UNION ALL
+      SELECT a.Ac_id, a.Ac_parent_id, hier.root FROM accounts a JOIN hier ON a.Ac_parent_id = hier.id
+    )
     SELECT 
-      id, user_id as userId, name, type, bank_name as bankName,
-      account_number as accountNumber, card_number as cardNumber,
-      sheba, color, icon, balance, initial_balance as initialBalance,
-      is_archived as isArchived, created_at as createdAt
-    FROM accounts
-    WHERE user_id = ?
+      a.Ac_id as id,
+      a.Ac_title as name,
+      a.Ac_parent_id as parentId,
+      a.Ac_balance as balance,
+      a.Ac_info as info,
+      a.ac_icon as rawIcon,
+      a.Ac_enable as enable,
+      hier.root as rootId,
+      b.BAc_cart_number as cardNumber,
+      b.BAc_account_cod as accountNumber,
+      b.BAc_sheba as sheba,
+      k.Bank_name as bankName
+    FROM accounts a
+    LEFT JOIN hier ON a.Ac_id = hier.id
+    LEFT JOIN BankAccounts b ON a.Ac_id = b.BAc_ac_id
+    LEFT JOIN Bank k ON b.BAc_bank_id = k.id
+    ORDER BY a.Ac_parent_id ASC, a.Ac_id ASC;
   `;
-  const params: unknown[] = [userId];
 
-  if (!includeArchived) {
-    query += ` AND is_archived = 0`;
+  const { results } = await c.env.DB.prepare(query).all();
+
+  const accounts = (results || []).map((row: any) => {
+    const rootId = Number(row.rootId || row.id);
+    const type = resolveAccountType(rootId);
+    const styling = resolveAccountStyling(type, rootId);
+
+    return {
+      id: String(row.id),
+      userId: 'user_default',
+      parentId: row.parentId === 0 ? null : String(row.parentId),
+      name: String(row.name || '').trim(),
+      type,
+      rootId,
+      bankName: row.bankName || (type === 'bank' ? 'بانک' : undefined),
+      accountNumber: row.accountNumber ? String(row.accountNumber).replace(/'/g, '') : undefined,
+      cardNumber: row.cardNumber || undefined,
+      sheba: row.sheba ? String(row.sheba).replace(/'/g, '') : undefined,
+      balance: Math.round(Number(row.balance || 0)),
+      initialBalance: 0,
+      color: styling.color,
+      icon: styling.icon,
+      isArchived: row.enable === 0,
+      createdAt: new Date().toISOString(),
+    };
+  });
+
+  if (typeFilter) {
+    const filtered = accounts.filter(acc => acc.type === typeFilter);
+    return c.json({ success: true, data: filtered });
   }
 
-  if (type) {
-    query += ` AND type = ?`;
-    params.push(type);
+  return c.json({ success: true, data: accounts });
+});
+
+/**
+ * دریافت اطلاعات یک حساب به همراه مانده و آمار گردش
+ */
+accountsRouter.get('/:id', async (c) => {
+  const id = c.req.param('id');
+  const numId = parseInt(id, 10);
+
+  if (isNaN(numId)) {
+    return c.json({ success: false, error: 'شناسه نامعتبر حساب' }, 400);
   }
 
-  query += ` ORDER BY is_archived ASC, type ASC, name ASC`;
+  const row = await c.env.DB.prepare(
+    `SELECT 
+       a.Ac_id as id, a.Ac_title as name, a.Ac_parent_id as parentId,
+       a.Ac_balance as balance, a.Ac_info as info, a.Ac_enable as enable,
+       b.BAc_cart_number as cardNumber, b.BAc_account_cod as accountNumber,
+       b.BAc_sheba as sheba, k.Bank_name as bankName
+     FROM accounts a
+     LEFT JOIN BankAccounts b ON a.Ac_id = b.BAc_ac_id
+     LEFT JOIN Bank k ON b.BAc_bank_id = k.id
+     WHERE a.Ac_id = ?`
+  ).bind(numId).first<any>();
 
-  const { results } = await c.env.DB.prepare(query).bind(...params).all();
+  if (!row) {
+    return c.json({ success: false, error: 'حساب یافت نشد' }, 404);
+  }
+
+  // گردش حساب در Activity
+  const txStats = await c.env.DB.prepare(
+    `SELECT 
+       COUNT(*) as txCount,
+       SUM(CASE WHEN Act_accRecive_id = ? OR Act_rec_Subacc_id = ? THEN Act_amount ELSE 0 END) as totalWithdraw,
+       SUM(CASE WHEN Act_accPay_id = ? OR Act_pay_Subacc_id = ? THEN Act_amount ELSE 0 END) as totalDeposit
+     FROM Activity
+     WHERE Act_accRecive_id = ? OR Act_rec_Subacc_id = ? OR Act_accPay_id = ? OR Act_pay_Subacc_id = ?`
+  ).bind(numId, numId, numId, numId, numId, numId, numId, numId).first<any>();
 
   return c.json({
     success: true,
-    data: (results || []).map((row: any) => ({
-      ...row,
-      isArchived: Boolean(row.isArchived),
-    })),
+    data: {
+      id: String(row.id),
+      name: String(row.name || '').trim(),
+      parentId: row.parentId === 0 ? null : String(row.parentId),
+      balance: Math.round(Number(row.balance || 0)),
+      bankName: row.bankName,
+      accountNumber: row.accountNumber ? String(row.accountNumber).replace(/'/g, '') : undefined,
+      cardNumber: row.cardNumber,
+      sheba: row.sheba ? String(row.sheba).replace(/'/g, '') : undefined,
+      txCount: Number(txStats?.txCount || 0),
+      totalWithdraw: Math.round(Number(txStats?.totalWithdraw || 0)),
+      totalDeposit: Math.round(Number(txStats?.totalDeposit || 0)),
+    },
   });
 });
 
 /**
- * ایجاد حساب مالی جدید (مبالغ به ریال)
+ * ایجاد حساب جدید در درخت پارمیس
  */
 accountsRouter.post('/', async (c) => {
-  const userId = c.get('userId');
   const body = await c.req.json<{
     name: string;
-    type?: 'bank' | 'wallet' | 'savings' | 'credit' | 'debt';
+    type?: string;
+    parentId?: string | number | null;
+    balance?: number;
+    initialBalance?: number;
     bankName?: string;
     accountNumber?: string;
     cardNumber?: string;
     sheba?: string;
-    color?: string;
-    icon?: string;
-    balance?: number;
-    initialBalance?: number;
   }>();
 
   if (!body.name || !body.name.trim()) {
     return c.json({ success: false, error: 'نام حساب الزامی است' }, 400);
   }
 
-  const id = `acc_${crypto.randomUUID()}`;
-  const initialBalance = Math.round(body.initialBalance ?? body.balance ?? 0);
-  const balance = Math.round(body.balance ?? initialBalance);
-  const type = body.type || 'bank';
-  const color = body.color || '#0284c7';
-  const icon = body.icon || (type === 'wallet' ? 'wallet' : type === 'savings' ? 'piggy-bank' : 'credit-card');
+  let parentId = 0;
+  if (body.parentId) {
+    parentId = Number(body.parentId) || 0;
+  } else {
+    // ریشه‌های پیش‌فرض بر اساس نوع
+    if (body.type === 'expense') parentId = 1;
+    else if (body.type === 'income') parentId = 2;
+    else if (body.type === 'wallet') parentId = 3;
+    else if (body.type === 'debt') parentId = 161;
+    else parentId = 4; // bank
+  }
+
+  // پیدا کردن بزرگترین Ac_id جاری
+  const maxRow = await c.env.DB.prepare('SELECT MAX(Ac_id) as maxId FROM accounts').first<{ maxId: number }>();
+  const nextId = (maxRow?.maxId || 350) + 1;
+  const balance = Math.round(body.balance ?? body.initialBalance ?? 0);
 
   await c.env.DB.prepare(
     `INSERT INTO accounts (
-      id, user_id, name, type, bank_name, account_number, card_number, sheba,
-      color, icon, balance, initial_balance
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  )
-    .bind(
-      id,
-      userId,
-      body.name.trim(),
-      type,
-      body.bankName ?? null,
-      body.accountNumber ?? null,
-      body.cardNumber ?? null,
-      body.sheba ?? null,
-      color,
-      icon,
-      balance,
-      initialBalance
-    )
-    .run();
+      Ac_id, Ac_title, Ac_parent_id, Ac_balance, Ac_enable, Ac_isLeaf, Ac_isSystematic
+    ) VALUES (?, ?, ?, ?, 1, 1, 0)`
+  ).bind(nextId, body.name.trim(), parentId, balance).run();
 
-  return c.json(
-    {
-      success: true,
-      data: {
-        id,
-        userId,
-        name: body.name.trim(),
-        type,
-        bankName: body.bankName,
-        accountNumber: body.accountNumber,
-        cardNumber: body.cardNumber,
-        sheba: body.sheba,
-        color,
-        icon,
-        balance,
-        initialBalance,
-      },
-    },
-    201
-  );
-});
+  // اگر حساب بانکی است، در BankAccounts هم ثبت شود
+  if (body.accountNumber || body.cardNumber || body.sheba) {
+    const maxBankRow = await c.env.DB.prepare('SELECT MAX(BAc_id) as maxBId FROM BankAccounts').first<{ maxBId: number }>();
+    const nextBankId = (maxBankRow?.maxBId || 10) + 1;
 
-/**
- * دریافت جزئیات یک حساب مالی و تراکنش‌های اخیر آن
- */
-accountsRouter.get('/:id', async (c) => {
-  const id = c.req.param('id');
-  const userId = c.get('userId');
-
-  const acc = await c.env.DB.prepare(
-    `SELECT 
-      id, user_id as userId, name, type, bank_name as bankName,
-      account_number as accountNumber, card_number as cardNumber, sheba,
-      color, icon, balance, initial_balance as initialBalance,
-      is_archived as isArchived, created_at as createdAt
-    FROM accounts WHERE id = ? AND user_id = ?`
-  )
-    .bind(id, userId)
-    .first<any>();
-
-  if (!acc) {
-    return c.json({ success: false, error: 'حساب مالی پیدا نشد' }, 404);
+    await c.env.DB.prepare(
+      `INSERT INTO BankAccounts (
+        BAc_id, BAc_ac_id, BAc_cart_number, BAc_account_cod, BAc_sheba, BAc_isenable
+      ) VALUES (?, ?, ?, ?, ?, 1)`
+    ).bind(
+      nextBankId,
+      nextId,
+      body.cardNumber || '',
+      body.accountNumber || '',
+      body.sheba || ''
+    ).run();
   }
-
-  // دریافت ۱۰ تراکنش اخیر این حساب
-  const { results: recentTxs } = await c.env.DB.prepare(
-    `SELECT 
-      t.id, t.amount, t.type, t.description, t.transaction_date as transactionDate,
-      c.name as categoryName, c.icon as categoryIcon,
-      fa.name as fromAccountName, ta.name as toAccountName
-    FROM transactions t
-    LEFT JOIN categories c ON t.category_id = c.id
-    LEFT JOIN accounts fa ON t.from_account_id = fa.id
-    LEFT JOIN accounts ta ON t.to_account_id = ta.id
-    WHERE (t.from_account_id = ? OR t.to_account_id = ?) AND t.user_id = ?
-    ORDER BY t.transaction_date DESC LIMIT 15`
-  )
-    .bind(id, id, userId)
-    .all();
 
   return c.json({
     success: true,
     data: {
-      ...acc,
-      isArchived: Boolean(acc.isArchived),
-      recentTransactions: recentTxs || [],
+      id: String(nextId),
+      name: body.name.trim(),
+      parentId: parentId === 0 ? null : String(parentId),
+      balance,
     },
-  });
+  }, 201);
 });
 
 /**
- * ویرایش اطلاعات یک حساب مالی
+ * ویرایش مشخصات حساب
  */
 accountsRouter.patch('/:id', async (c) => {
   const id = c.req.param('id');
-  const userId = c.get('userId');
+  const numId = parseInt(id, 10);
+  if (isNaN(numId)) return c.json({ success: false, error: 'شناسه نامعتبر' }, 400);
+
   const body = await c.req.json<{
     name?: string;
-    type?: 'bank' | 'wallet' | 'savings' | 'credit' | 'debt';
-    bankName?: string;
-    accountNumber?: string;
-    cardNumber?: string;
-    sheba?: string;
-    color?: string;
-    icon?: string;
+    parentId?: string | number | null;
     balance?: number;
-    initialBalance?: number;
-    isArchived?: boolean;
+    cardNumber?: string;
+    accountNumber?: string;
+    sheba?: string;
   }>();
 
-  const updates: string[] = [];
-  const params: unknown[] = [];
-
   if (body.name !== undefined) {
-    updates.push('name = ?');
-    params.push(body.name.trim());
+    await c.env.DB.prepare('UPDATE accounts SET Ac_title = ? WHERE Ac_id = ?').bind(body.name.trim(), numId).run();
   }
-  if (body.type !== undefined) {
-    updates.push('type = ?');
-    params.push(body.type);
-  }
-  if (body.bankName !== undefined) {
-    updates.push('bank_name = ?');
-    params.push(body.bankName);
-  }
-  if (body.accountNumber !== undefined) {
-    updates.push('account_number = ?');
-    params.push(body.accountNumber);
-  }
-  if (body.cardNumber !== undefined) {
-    updates.push('card_number = ?');
-    params.push(body.cardNumber);
-  }
-  if (body.sheba !== undefined) {
-    updates.push('sheba = ?');
-    params.push(body.sheba);
-  }
-  if (body.color !== undefined) {
-    updates.push('color = ?');
-    params.push(body.color);
-  }
-  if (body.icon !== undefined) {
-    updates.push('icon = ?');
-    params.push(body.icon);
+  if (body.parentId !== undefined) {
+    const pId = body.parentId === null ? 0 : Number(body.parentId);
+    await c.env.DB.prepare('UPDATE accounts SET Ac_parent_id = ? WHERE Ac_id = ?').bind(pId, numId).run();
   }
   if (body.balance !== undefined) {
-    updates.push('balance = ?');
-    params.push(Math.round(body.balance));
-  }
-  if (body.initialBalance !== undefined) {
-    updates.push('initial_balance = ?');
-    params.push(Math.round(body.initialBalance));
-  }
-  if (body.isArchived !== undefined) {
-    updates.push('is_archived = ?');
-    params.push(body.isArchived ? 1 : 0);
+    await c.env.DB.prepare('UPDATE accounts SET Ac_balance = ? WHERE Ac_id = ?').bind(body.balance, numId).run();
   }
 
-  if (updates.length === 0) {
-    return c.json({ success: false, error: 'هیچ فیلدی برای تغییر ارسال نشده است' }, 400);
+  if (body.cardNumber !== undefined || body.accountNumber !== undefined || body.sheba !== undefined) {
+    const existing = await c.env.DB.prepare('SELECT BAc_id FROM BankAccounts WHERE BAc_ac_id = ?').bind(numId).first();
+    if (existing) {
+      await c.env.DB.prepare(
+        `UPDATE BankAccounts 
+         SET BAc_cart_number = COALESCE(?, BAc_cart_number),
+             BAc_account_cod = COALESCE(?, BAc_account_cod),
+             BAc_sheba = COALESCE(?, BAc_sheba)
+         WHERE BAc_ac_id = ?`
+      ).bind(body.cardNumber ?? null, body.accountNumber ?? null, body.sheba ?? null, numId).run();
+    }
   }
 
-  params.push(id, userId);
-  const query = `UPDATE accounts SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`;
-  const result = await c.env.DB.prepare(query).bind(...params).run();
-
-  if (result.meta?.changes === 0) {
-    return c.json({ success: false, error: 'حساب پیدا نشد یا دسترسی غیرمجاز است' }, 404);
-  }
-
-  return c.json({ success: true, message: 'حساب با موفقیت ویرایش شد' });
+  return c.json({ success: true, message: 'حساب به‌روزرسانی شد' });
 });
 
 /**
- * حذف یک حساب مالی (اگر تراکنش داشته باشد، آرشیو می‌شود)
+ * حذف حساب
  */
 accountsRouter.delete('/:id', async (c) => {
   const id = c.req.param('id');
-  const userId = c.get('userId');
+  const numId = parseInt(id, 10);
+  if (isNaN(numId)) return c.json({ success: false, error: 'شناسه نامعتبر' }, 400);
 
-  // بررسی وجود تراکنش متصل به حساب
-  const txCount = await c.env.DB.prepare(
-    'SELECT COUNT(*) as count FROM transactions WHERE (from_account_id = ? OR to_account_id = ?) AND user_id = ?'
-  )
-    .bind(id, id, userId)
-    .first<{ count: number }>();
-
-  if (txCount && txCount.count > 0) {
-    await c.env.DB.prepare('UPDATE accounts SET is_archived = 1 WHERE id = ? AND user_id = ?')
-      .bind(id, userId)
-      .run();
-
-    return c.json({
-      success: true,
-      archived: true,
-      message: 'این حساب دارای تراکنش است و جهت حفظ دفاتر مالی به جای حذف کامل، آرشیو شد',
-    });
+  // بررسی داشتن زیرمجموعه
+  const child = await c.env.DB.prepare('SELECT COUNT(*) as count FROM accounts WHERE Ac_parent_id = ?').bind(numId).first<{ count: number }>();
+  if (child && child.count > 0) {
+    return c.json({ success: false, error: 'حسابی که زیرمجموعه دارد را نمی‌توان حذف کرد' }, 400);
   }
 
-  await c.env.DB.prepare('DELETE FROM accounts WHERE id = ? AND user_id = ?')
-    .bind(id, userId)
-    .run();
+  // بررسی داشتن تراکنش
+  const tx = await c.env.DB.prepare(
+    'SELECT COUNT(*) as count FROM Activity WHERE Act_accPay_id = ? OR Act_accRecive_id = ? OR Act_pay_Subacc_id = ? OR Act_rec_Subacc_id = ?'
+  ).bind(numId, numId, numId, numId).first<{ count: number }>();
+
+  if (tx && tx.count > 0) {
+    // غیرفعال کردن به جای حذف
+    await c.env.DB.prepare('UPDATE accounts SET Ac_enable = 0 WHERE Ac_id = ?').bind(numId).run();
+    return c.json({ success: true, message: 'حساب به دلیل داشتن گردش غیرفعال شد' });
+  }
+
+  await c.env.DB.prepare('DELETE FROM BankAccounts WHERE BAc_ac_id = ?').bind(numId).run();
+  await c.env.DB.prepare('DELETE FROM accounts WHERE Ac_id = ?').bind(numId).run();
 
   return c.json({ success: true, message: 'حساب با موفقیت حذف شد' });
 });

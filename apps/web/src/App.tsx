@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Transaction, Account } from './types.js';
+import { Transaction, Account, PendingSms } from './types.js';
 import { api } from './lib/api.js';
 import { Header } from './components/Header.js';
 import { Navigation, TabType } from './components/Navigation.js';
@@ -8,7 +8,7 @@ import { AccountsTab } from './components/AccountsTab.js';
 import { SplitwiseTab } from './components/SplitwiseTab.js';
 import { AnalyticsTab } from './components/AnalyticsTab.js';
 import { SettingsTab } from './components/SettingsTab.js';
-import { SmsSimulatorModal } from './components/SmsSimulatorModal.js';
+import { SmsInboxModal } from './components/SmsInboxModal.js';
 import { ToSplitModal } from './components/ToSplitModal.js';
 import { AddExpenseModal, NewGroupExpenseData } from './components/AddExpenseModal.js';
 import { GroupExpenseRecord } from './components/SplitwiseTab.js';
@@ -22,13 +22,14 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('transactions');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [pendingSmsList, setPendingSmsList] = useState<PendingSms[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [hasMore, setHasMore] = useState<boolean>(true);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
 
   // وضعیت‌های مودال
-  const [isSimulatorOpen, setIsSimulatorOpen] = useState<boolean>(false);
+  const [isInboxOpen, setIsInboxOpen] = useState<boolean>(false);
   const [splitModalTx, setSplitModalTx] = useState<Transaction | null>(null);
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState<boolean>(false);
@@ -45,12 +46,14 @@ export const App: React.FC = () => {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [txList, accList] = await Promise.all([
+      const [txList, accList, pendingList] = await Promise.all([
         api.getTransactions({ limit: PAGE_SIZE, offset: 0 }),
         api.getAccounts(),
+        api.getPendingSms(),
       ]);
       setTransactions(txList);
       setAccounts(accList);
+      setPendingSmsList(pendingList);
       setHasMore(txList.length >= PAGE_SIZE);
     } finally {
       setIsLoading(false);
@@ -85,12 +88,18 @@ export const App: React.FC = () => {
   // ثبت تراکنش جدید حسابداری
   const handleAddTransaction = async (data: {
     amount: number;
-    type: 'debit' | 'credit' | 'transfer';
+    type: 'debit' | 'credit' | 'transfer' | 'compound';
     fromAccountId?: string;
     toAccountId?: string;
     description?: string;
     trackingCode?: string;
     transactionDate?: string;
+    items?: Array<{
+      entryType: 'source' | 'destination';
+      accountId?: string | null;
+      amount: number;
+      description?: string | null;
+    }>;
   }) => {
     const newTx = await api.createTransaction(data);
     setTransactions((prev) => [newTx, ...prev]);
@@ -99,8 +108,15 @@ export const App: React.FC = () => {
     const updatedAccounts = await api.getAccounts();
     setAccounts(updatedAccounts);
 
-    const typeLabel = data.type === 'debit' ? 'هزینه' : data.type === 'credit' ? 'درآمد' : 'انتقال بین‌حسابی';
-    showToast(`تراکنش ${typeLabel} به مبلغ ${new Intl.NumberFormat('fa-IR').format(data.amount)} ت ثبت شد.`);
+    const typeLabel =
+      data.type === 'debit'
+        ? 'هزینه'
+        : data.type === 'credit'
+        ? 'درآمد'
+        : data.type === 'compound'
+        ? 'مرکب چند حسابی'
+        : 'انتقال بین‌حسابی';
+    showToast(`سند ${typeLabel} به مبلغ ${new Intl.NumberFormat('fa-IR').format(Math.round(data.amount / 10))} ت ثبت شد.`);
   };
 
   // ویرایش و اصلاح تراکنش
@@ -127,56 +143,107 @@ export const App: React.FC = () => {
 
   // حذف تراکنش
   const handleDeleteTransaction = async (id: string) => {
-    await api.deleteTransaction(id);
-    setTransactions((prev) => prev.filter((t) => t.id !== id));
-    const updatedAccounts = await api.getAccounts();
-    setAccounts(updatedAccounts);
-    showToast('تراکنش با موفقیت حذف و اثر مالی آن بازگردانده شد.');
+    if (!confirm('آیا از حذف این سند مالی اطمینان دارید؟ اثر مالی آن به حساب‌ها بازگردانده می‌شود.')) {
+      return;
+    }
+
+    const success = await api.deleteTransaction(id);
+    if (success) {
+      setTransactions((prev) => prev.filter((t) => t.id !== id));
+      const updatedAccounts = await api.getAccounts();
+      setAccounts(updatedAccounts);
+      showToast('تراکنش با موفقیت حذف و اثر آن برگردانده شد.');
+    }
   };
 
-  // تعریف حساب جدید
+  // ثبت حساب جدید با کلید والد درختی
   const handleAddAccount = async (accountData: Partial<Account>) => {
-    const newAcc = await api.createAccount(accountData as any);
+    if (!accountData.name) return;
+    const newAcc = await api.createAccount({
+      name: accountData.name,
+      type: accountData.type,
+      parentId: accountData.parentId,
+      bankName: accountData.bankName,
+      accountNumber: accountData.accountNumber,
+      cardNumber: accountData.cardNumber,
+      sheba: accountData.sheba,
+      color: accountData.color,
+      icon: accountData.icon,
+      initialBalance: accountData.initialBalance,
+      balance: accountData.balance,
+    });
     setAccounts((prev) => [...prev, newAcc]);
     showToast(`حساب "${newAcc.name}" با موفقیت تعریف شد.`);
   };
 
-  // ویرایش حساب
+  // بروزرسانی حساب
   const handleUpdateAccount = async (id: string, accountData: Partial<Account>) => {
-    await api.updateAccount(id, accountData);
-    const updated = await api.getAccounts();
-    setAccounts(updated);
-    showToast('اطلاعات حساب با موفقیت بروزرسانی شد.');
-  };
-
-  // حذف حساب
-  const handleDeleteAccount = async (id: string) => {
-    await api.deleteAccount(id);
-    const updated = await api.getAccounts();
-    setAccounts(updated);
-    showToast('حساب با موفقیت حذف یا بایگانی شد.');
-  };
-
-  // هدایت از حساب‌ها به تب تراکنش‌ها برای مشاهده گردش حساب
-  const handleSelectAccountTransactions = (accountId: string) => {
-    setSelectedAccountId(accountId);
-    setActiveTab('transactions');
-  };
-
-  // ثبت پیامک جدید از شبیه‌ساز یا دستگاه اندروید
-  const handleSaveSmsTransaction = async (smsText: string) => {
-    const res = await api.ingestSms(smsText);
-    if (res.success && res.transaction) {
-      setTransactions((prev) => [res.transaction!, ...prev]);
-      const updatedAccounts = await api.getAccounts();
-      setAccounts(updatedAccounts);
-      showToast(`پیامک ${res.transaction.bankName || 'بانکی'} با موفقیت پردازش و ثبت شد!`);
-    } else {
-      showToast(res.message || 'خطا در ثبت پیامک');
+    const success = await api.updateAccount(id, accountData);
+    if (success) {
+      const updatedList = await api.getAccounts();
+      setAccounts(updatedList);
+      showToast('اطلاعات حساب بروزرسانی شد.');
     }
   };
 
-  // تبدیل تراکنش به دنگ
+  // حذف یا آرشیو حساب
+  const handleDeleteAccount = async (id: string) => {
+    const success = await api.deleteAccount(id);
+    if (success) {
+      const updatedList = await api.getAccounts();
+      setAccounts(updatedList);
+      showToast('حساب با موفقیت حذف یا آرشیو شد.');
+    }
+  };
+
+  // انتخاب حساب برای فیلتر
+  const handleSelectAccountTransactions = (accId: string) => {
+    setSelectedAccountId(accId);
+    setActiveTab('transactions');
+  };
+
+  // دریافت و ذخیره پیامک خام
+  const handleSaveSmsTransaction = async (smsText: string) => {
+    const res = await api.ingestSms(smsText);
+    if (res.success) {
+      const pendingList = await api.getPendingSms();
+      setPendingSmsList(pendingList);
+      await loadData();
+      showToast(res.message || 'پیامک بانکی دریافت و ذخیره شد.');
+    } else {
+      showToast(res.message || 'پیامک نامعتبر است.');
+    }
+  };
+
+  // تبدیل پیامک صف به تراکنش
+  const handleConvertPendingSms = async (
+    smsId: string,
+    data: {
+      fromAccountId?: string;
+      toAccountId?: string;
+      amount?: number;
+      description?: string;
+    }
+  ) => {
+    const ok = await api.convertSmsToTransaction(smsId, data);
+    if (ok) {
+      await loadData();
+      showToast('پیامک با موفقیت به سند حسابداری تبدیل شد.');
+    } else {
+      showToast('خطا در تبدیل پیامک به سند.');
+    }
+  };
+
+  // نادیده گرفتن پیامک
+  const handleIgnorePendingSms = async (smsId: string) => {
+    const ok = await api.ignoreSms(smsId);
+    if (ok) {
+      setPendingSmsList((prev) => prev.filter((s) => s.id !== smsId));
+      showToast('پیامک نادیده گرفته شد.');
+    }
+  };
+
+  // تایید تبدیل به دنگ
   const handleConfirmSplit = async (
     tx: Transaction,
     groupId: string,
@@ -241,7 +308,10 @@ export const App: React.FC = () => {
       )}
 
       {/* هدر اپلیکیشن */}
-      <Header onOpenSimulator={() => setIsSimulatorOpen(true)} />
+      <Header
+        onOpenInbox={() => setIsInboxOpen(true)}
+        pendingCount={pendingSmsList.length}
+      />
 
       {/* محتوای اصلی */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 pt-4 sm:pt-6">
@@ -290,6 +360,16 @@ export const App: React.FC = () => {
         </div>
       </main>
 
+      {/* مودال صندوق پیامک‌های بانکی */}
+      <SmsInboxModal
+        isOpen={isInboxOpen}
+        onClose={() => setIsInboxOpen(false)}
+        pendingList={pendingSmsList}
+        accounts={accounts}
+        onConvert={handleConvertPendingSms}
+        onIgnore={handleIgnorePendingSms}
+      />
+
       {/* مودال ثبت تراکنش جدید حسابداری */}
       <AddTransactionModal
         isOpen={isAddTxOpen}
@@ -305,13 +385,6 @@ export const App: React.FC = () => {
         transaction={editingTx}
         accounts={accounts}
         onUpdateTransaction={handleUpdateTransaction}
-      />
-
-      {/* مودال شبیه‌ساز پیامک بانکی */}
-      <SmsSimulatorModal
-        isOpen={isSimulatorOpen}
-        onClose={() => setIsSimulatorOpen(false)}
-        onSaveTransaction={handleSaveSmsTransaction}
       />
 
       {/* مودال اشتراک‌گذاری در دنگ (Magic Modal) */}

@@ -259,4 +259,12 @@ describe('Worker API Endpoints (فاز ۳)', () => {
     expect(data.data.groupId).toBe('grp_home');
     expect(Array.isArray(data.data.settlements)).toBe(true);
   });
+
+  it('دریافت لیست پیامک‌های در انتظار (GET /api/sms/pending)', async () => {
+    const res = await app.request('/api/sms/pending', {}, mockEnv);
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as any;
+    expect(data.success).toBe(true);
+    expect(Array.isArray(data.data)).toBe(true);
+  });
 });

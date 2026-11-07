@@ -7,12 +7,16 @@ import {
   TrendingUp,
   TrendingDown,
   UserCheck,
+  UserPlus,
+  Settings,
   Sparkles,
   Percent,
   Calendar,
 } from 'lucide-react';
 import { calculateGroupBalances, simplifyDebts } from '@jibban/debt-engine';
 import { formatJalali } from '../lib/date.js';
+import { GroupMemberItem, getStoredGroupMembers, saveStoredGroupMembers } from '../lib/groupMembersStorage.js';
+import { ManageMembersModal } from './ManageMembersModal.js';
 
 export interface GroupExpenseRecord {
   id: string;
@@ -31,15 +35,13 @@ interface SplitwiseTabProps {
 
 const STORAGE_KEY_GROUP_EXPENSES = 'jibban_local_group_expenses';
 
-// هزینه‌های پایه اولیه خالی
-const DEFAULT_EXPENSES: GroupExpenseRecord[] = [];
-
 export const SplitwiseTab: React.FC<SplitwiseTabProps> = ({ onOpenAddExpense }) => {
+  const [members, setMembers] = useState<GroupMemberItem[]>(getStoredGroupMembers());
+  const [isManageMembersOpen, setIsManageMembersOpen] = useState(false);
+
   const [expenses, setExpenses] = useState<GroupExpenseRecord[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEY_GROUP_EXPENSES);
-    if (!saved) {
-      return [];
-    }
+    if (!saved) return [];
     try {
       return JSON.parse(saved);
     } catch {
@@ -48,6 +50,11 @@ export const SplitwiseTab: React.FC<SplitwiseTabProps> = ({ onOpenAddExpense }) 
   });
 
   const [settledSuccess, setSettledSuccess] = useState<string | null>(null);
+
+  const handleSaveMembers = (newMembers: GroupMemberItem[]) => {
+    setMembers(newMembers);
+    saveStoredGroupMembers(newMembers);
+  };
 
   // محاسبه پویای تراز اعضا و تسویه‌حساب‌ها با الگوریتم debt-engine
   const { memberBalances, settlements } = useMemo(() => {
@@ -66,13 +73,14 @@ export const SplitwiseTab: React.FC<SplitwiseTabProps> = ({ onOpenAddExpense }) 
 
     const balances = calculateGroupBalances(engineExpenses, []);
 
-    // نام اعضا
-    const userNames: Record<string, string> = {
-      من: 'من (کاربر اصلی)',
-    };
+    // نام اعضا از لیست اعضای ذخیره‌شده
+    const userNames: Record<string, string> = {};
+    members.forEach((m) => {
+      userNames[m.id] = m.name;
+    });
 
-    // استخراج پویا اعضای شرکت‌کننده در هزینه‌ها
-    const userSet = new Set<string>(['من']);
+    // استخراج اعضا بر اساس لیست اعضای جاری گروه
+    const userSet = new Set<string>(members.map((m) => m.id));
     for (const exp of expenses) {
       if (exp.payerName) userSet.add(exp.payerName);
       for (const s of exp.splits) {
@@ -110,7 +118,7 @@ export const SplitwiseTab: React.FC<SplitwiseTabProps> = ({ onOpenAddExpense }) 
       memberBalances: membersList,
       settlements: calculatedSettlements,
     };
-  }, [expenses]);
+  }, [expenses, members]);
 
   const formatToman = (amount: number) => {
     return new Intl.NumberFormat('fa-IR').format(amount);
@@ -138,8 +146,8 @@ export const SplitwiseTab: React.FC<SplitwiseTabProps> = ({ onOpenAddExpense }) 
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <span className="badge badge-split text-xs font-bold">گروه: خرج‌های مشترک خانه</span>
-              <span className="text-xs text-slate-400">۳ عضو فعال</span>
+              <span className="badge badge-split text-xs font-bold">گروه: خرج‌های مشترک</span>
+              <span className="text-xs text-slate-400">{members.length} عضو فعال</span>
             </div>
 
             <div className="mt-3">
@@ -158,180 +166,186 @@ export const SplitwiseTab: React.FC<SplitwiseTabProps> = ({ onOpenAddExpense }) 
                   {formatToman(myBalance)}
                 </span>
                 <span className="text-xs text-slate-400">تومان</span>
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                    myBalance > 0
-                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                      : myBalance < 0
-                      ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                      : 'bg-slate-800 text-slate-400'
-                  }`}
-                >
-                  {myBalance > 0 ? 'طلبکار از گروه' : myBalance < 0 ? 'بدهکار به گروه' : 'بی‌حساب'}
+                <span className="text-xs text-slate-500 mr-2">
+                  {myBalance > 0 ? '(شما طلبکارید)' : myBalance < 0 ? '(شما بدهکارید)' : '(بی‌حساب)'}
                 </span>
               </div>
             </div>
           </div>
 
-          <div className="w-full sm:w-auto flex items-center justify-between sm:justify-end gap-3 pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-800">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              onClick={() => setIsManageMembersOpen(true)}
+              className="btn btn-secondary text-xs py-2 sm:py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 flex-1 sm:flex-initial"
+            >
+              <Users className="w-4 h-4 text-purple-400" />
+              <span>مدیریت اعضا</span>
+            </button>
+
             <button
               onClick={onOpenAddExpense}
-              className="btn btn-split text-xs sm:text-sm py-2.5 px-4 shadow-lg shadow-purple-500/20"
+              className="btn btn-primary text-xs py-2 sm:py-2.5 px-3.5 rounded-xl flex items-center justify-center gap-1.5 flex-1 sm:flex-initial shadow-md shadow-purple-500/20"
             >
               <PlusCircle className="w-4 h-4" />
-              <span>ثبت هزینه جدید گروه</span>
+              <span>ثبت خرج جدید</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* بخش تسویه‌حساب‌های بهینه (Optimal Settlements) */}
-      <div className="space-y-3">
+      {/* بخش اعضا و تراز تفکیکی */}
+      <div className="glass-card p-4 sm:p-5 border-slate-800 space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm sm:text-base font-bold text-slate-200 flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-purple-400" />
-            <span>تراکنش‌های بهینه تسویه (پیشنهادی موتور Spliit)</span>
-          </h3>
-          <span className="text-xs text-slate-400 font-normal">
-            {settlements.length} تراکنش برای صفر کردن همه حساب‌ها
-          </span>
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4 text-purple-400" />
+            <h3 className="text-sm font-bold text-white">اعضای گروه و وضعیت تراز</h3>
+          </div>
+          <button
+            onClick={() => setIsManageMembersOpen(true)}
+            className="text-xs text-purple-400 hover:text-purple-300 transition flex items-center gap-1"
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>ویرایش / افزودن اعضا</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+          {memberBalances.map((member) => (
+            <div
+              key={member.id}
+              className="p-3.5 rounded-xl bg-slate-900/50 border border-slate-800/80 flex items-center justify-between hover:border-slate-700 transition"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-full bg-slate-800 text-slate-200 font-bold text-sm flex items-center justify-center border border-slate-700">
+                  {member.name.slice(0, 1)}
+                </div>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-bold text-white truncate max-w-[120px]">
+                    {member.name}
+                  </h4>
+                  <span className="text-[10px] text-slate-400">
+                    پرداختی: {formatToman(member.totalPaid)} ت
+                  </span>
+                </div>
+              </div>
+
+              <div className="text-left font-mono">
+                <span
+                  className={`text-xs sm:text-sm font-extrabold ${
+                    member.netBalance > 0
+                      ? 'text-emerald-400'
+                      : member.netBalance < 0
+                      ? 'text-rose-400'
+                      : 'text-slate-400'
+                  }`}
+                >
+                  {member.netBalance > 0 ? '+' : ''}
+                  {formatToman(member.netBalance)}
+                </span>
+                <span className="text-[9px] text-slate-500 block">
+                  {member.netBalance > 0 ? 'طلبکار' : member.netBalance < 0 ? 'بدهکار' : 'تسویه'}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* پیشنهادهای تسویه بهینه (Debt Simplification) */}
+      <div className="glass-card p-4 sm:p-5 border-slate-800 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-amber-400" />
+            <h3 className="text-sm font-bold text-white">تراکنش‌های بهینه تسویه‌حساب</h3>
+          </div>
+          <span className="text-[11px] text-slate-400">الگوریتم کاهش تعداد تراکنش‌ها</span>
         </div>
 
         {settlements.length === 0 ? (
-          <div className="glass-card p-6 text-center text-slate-400 text-sm">
-            🎉 تمامی حساب‌های این گروه تسویه و برابر شده است!
+          <div className="p-6 text-center text-slate-400 text-xs bg-slate-900/30 rounded-xl border border-slate-800/50">
+            <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto mb-2 opacity-80" />
+            <span>تمامی حساب‌های گروه کاملاً تسویه است و بدهی معوقه‌ای وجود ندارد.</span>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="space-y-2">
             {settlements.map((s) => (
               <div
                 key={s.id}
-                className="glass-card p-4 flex items-center justify-between gap-3 border-purple-500/20 hover:border-purple-500/40"
+                className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 flex items-center justify-between gap-3 text-xs"
               >
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-300 flex items-center justify-center text-sm font-bold">
-                    {s.fromName[0]}
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-slate-200 flex items-center gap-1.5">
-                      <span>{s.fromName}</span>
-                      <ArrowRight className="w-3.5 h-3.5 text-slate-400 rotate-180" />
-                      <span>{s.toName}</span>
-                    </div>
-                    <div className="text-xs text-purple-400 font-bold mt-0.5">
-                      {formatToman(s.amount)} تومان
-                    </div>
-                  </div>
+                <div className="flex items-center gap-2 text-slate-200">
+                  <span className="font-bold text-rose-400">{s.fromName}</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-slate-500" />
+                  <span className="font-bold text-emerald-400">{s.toName}</span>
                 </div>
 
-                <button
-                  onClick={() => handleSettle(s.fromName, s.toName, s.amount)}
-                  className="btn btn-secondary text-xs py-1.5 px-3 hover:bg-emerald-500/20 hover:text-emerald-400 hover:border-emerald-500/30"
-                  title="ثبت تسویه این مبلغ"
-                >
-                  <UserCheck className="w-3.5 h-3.5" />
-                  <span>ثبت تسویه</span>
-                </button>
+                <div className="flex items-center gap-3">
+                  <span className="font-mono font-extrabold text-white text-xs sm:text-sm">
+                    {formatToman(s.amount)} تومان
+                  </span>
+                  <button
+                    onClick={() => handleSettle(s.fromName, s.toName, s.amount)}
+                    className="btn btn-secondary text-[11px] py-1 px-2.5 rounded-lg text-emerald-400 hover:bg-emerald-500/10 border-emerald-500/30 transition"
+                  >
+                    تسویه شد
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {/* لیست اعضا و تراز هر عضو */}
-      <div className="space-y-3">
-        <h3 className="text-sm sm:text-base font-bold text-slate-200 flex items-center gap-2">
-          <Users className="w-4 h-4 text-purple-400" />
-          <span>تراز اعضای گروه</span>
-        </h3>
-
-        <div className="glass-card divide-y divide-slate-800/80 overflow-hidden">
-          {memberBalances.map((member) => {
-            const isCreditor = member.netBalance > 0;
-            const isZero = member.netBalance === 0;
-
-            return (
-              <div key={member.id} className="p-4 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-slate-800 text-slate-200 flex items-center justify-center font-bold text-base">
-                    {member.name[0]}
-                  </div>
-                  <div>
-                    <div className="text-sm font-bold text-slate-100">{member.name}</div>
-                    <div className="text-xs text-slate-400 mt-0.5">
-                      پرداختی: {formatToman(member.totalPaid)} ت | مصرف: {formatToman(member.totalShare)} ت
-                    </div>
-                  </div>
-                </div>
-
-                <div className="text-left font-mono">
-                  {isZero ? (
-                    <span className="text-xs text-slate-400 font-medium">بی‌حساب (۰ ت)</span>
-                  ) : (
-                    <div className={`text-sm font-bold ${isCreditor ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {isCreditor ? '+' : ''}
-                      {formatToman(member.netBalance)}
-                      <span className="text-xs font-normal mr-1">تومان</span>
-                    </div>
-                  )}
-                  <div className="text-[10px] text-slate-500">
-                    {isCreditor ? 'طلبکار' : isZero ? 'تسویه' : 'بدهکار'}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+      {/* تاریخچه مخارج گروهی ثبت شده */}
+      <div className="glass-card p-4 sm:p-5 border-slate-800 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-sky-400" />
+            <h3 className="text-sm font-bold text-white">تاریخچه مخارج گروه</h3>
+          </div>
+          <span className="text-xs text-slate-400">{expenses.length} مورد ثبت‌شده</span>
         </div>
-      </div>
 
-      {/* تاریخچه هزینه‌های گروه با تاریخ‌های شمسی و شیوه تقسیم */}
-      <div className="space-y-3">
-        <h3 className="text-sm sm:text-base font-bold text-slate-200 flex items-center gap-2">
-          <Calendar className="w-4 h-4 text-purple-400" />
-          <span>تاریخچه هزینه‌های ثبت‌شده گروه</span>
-        </h3>
-
-        <div className="glass-card divide-y divide-slate-800/80 overflow-hidden">
-          {expenses.length === 0 ? (
-            <div className="p-8 text-center text-slate-400 text-xs sm:text-sm">
-              هیچ هزینه گروهی ثبت نشده است. با دکمه بالا یا تبدیل تراکنش به دنگ می‌توانید هزینه جدید اضافه کنید.
-            </div>
-          ) : (
-            expenses.map((exp) => (
-              <div key={exp.id} className="p-3.5 sm:p-4 flex items-center justify-between gap-3">
-                <div className="space-y-1">
-                  <div className="text-sm font-bold text-slate-200">{exp.description}</div>
-                  <div className="text-xs text-slate-400 flex flex-wrap items-center gap-2">
-                    <span>پرداخت‌کننده: <strong className="text-slate-300">{exp.payerName}</strong></span>
+        {expenses.length === 0 ? (
+          <div className="py-8 text-center text-slate-500 text-xs">
+            هنوز هیچ خرجی برای این گروه ثبت نشده است. با دکمه «ثبت خرج جدید» اولین هزینه را اضافه کنید.
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+            {expenses.map((exp) => (
+              <div
+                key={exp.id}
+                className="p-3 rounded-xl bg-slate-900/40 border border-slate-800/60 flex items-center justify-between gap-3 text-xs"
+              >
+                <div>
+                  <h4 className="font-semibold text-white">{exp.description}</h4>
+                  <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5">
+                    <span>پرداخت‌کننده: {members.find((m) => m.id === exp.payerName)?.name || exp.payerName}</span>
                     <span>•</span>
-                    <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20">
-                      {exp.splitType === 'percentage' ? (
-                        <>
-                          <Percent className="w-3 h-3" />
-                          <span>تقسیم درصدی ({exp.splits.map((s) => `${s.userId}: ${s.percentage || Math.round((s.owedAmount / exp.amount) * 100)}٪`).join('، ')})</span>
-                        </>
-                      ) : (
-                        <>
-                          <Users className="w-3 h-3" />
-                          <span>تقسیم مساوی بین {exp.splits.length} نفر</span>
-                        </>
-                      )}
-                    </span>
+                    <span>{formatJalali(exp.date)}</span>
                     <span>•</span>
-                    <span className="text-[11px] text-slate-400" title={formatJalali(exp.date, 'full')}>
-                      {formatJalali(exp.date, 'relative')}
+                    <span className="text-purple-400">
+                      {exp.splitType === 'equal' ? 'تقسیم مساوی' : 'تقسیم درصدی'}
                     </span>
                   </div>
                 </div>
 
-                <div className="text-sm font-bold font-mono text-purple-300 shrink-0">
-                  {formatToman(exp.amount)} <span className="text-xs font-normal text-slate-400">تومان</span>
+                <div className="font-mono font-bold text-emerald-400 text-xs sm:text-sm">
+                  {formatToman(exp.amount)} تومان
                 </div>
               </div>
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* مودال مدیریت اعضای گروه */}
+      <ManageMembersModal
+        isOpen={isManageMembersOpen}
+        onClose={() => setIsManageMembersOpen(false)}
+        members={members}
+        onSaveMembers={handleSaveMembers}
+      />
     </div>
   );
 };

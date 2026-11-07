@@ -1,5 +1,6 @@
-import { Transaction, Group, GroupSummaryData, Category, Account } from '../types.js';
+import { Transaction, Group, GroupSummaryData, Category, Account, PendingSms } from '../types.js';
 import { parseBankSms } from '@jibban/sms-parser-ir';
+import { PARMIS_ACCOUNT_PARENT_MAP } from './parmisHierarchy.js';
 
 const CLOUD_API_BASE = 'https://jibban-api.ajbv.ir/api';
 const API_BASE =
@@ -70,15 +71,23 @@ export const api = {
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
-          saveLocalAccounts(json.data);
-          return json.data;
+          // تطبیق و تزریق خودکار parentId برای حساب‌های پارمیس در صورت خالی بودن دیتابیس ریموت
+          const enriched = json.data.map((acc: Account) => ({
+            ...acc,
+            parentId: acc.parentId || PARMIS_ACCOUNT_PARENT_MAP[acc.id] || PARMIS_ACCOUNT_PARENT_MAP[acc.id.replace(/^acc_/, '')] || null,
+          }));
+          saveLocalAccounts(enriched);
+          return enriched;
         }
       }
     } catch {
       // استفاده از کش محلی در صورت قطعی شبکه
     }
 
-    let accs = getLocalAccounts();
+    let accs = getLocalAccounts().map((acc: Account) => ({
+      ...acc,
+      parentId: acc.parentId || PARMIS_ACCOUNT_PARENT_MAP[acc.id] || PARMIS_ACCOUNT_PARENT_MAP[acc.id.replace(/^acc_/, '')] || null,
+    }));
     if (filter?.type) accs = accs.filter((a) => a.type === filter.type);
     return accs;
   },
@@ -88,7 +97,8 @@ export const api = {
    */
   async createAccount(data: {
     name: string;
-    type?: 'bank' | 'wallet' | 'savings' | 'credit' | 'counterparty';
+    type?: 'bank' | 'wallet' | 'savings' | 'credit' | 'counterparty' | 'expense' | 'income' | 'debt';
+    parentId?: string | null;
     bankName?: string;
     accountNumber?: string;
     cardNumber?: string;
@@ -521,6 +531,83 @@ export const api = {
         body: JSON.stringify(data),
       });
       if (res.ok) return true;
+    } catch {
+      //
+    }
+    return false;
+  },
+
+  /**
+   * دریافت پیامک‌های در انتظار تایید (SMS Inbox)
+   */
+  async getPendingSms(): Promise<PendingSms[]> {
+    try {
+      const token = getSyncToken();
+      const res = await fetch(`${API_BASE}/sms/pending`, {
+        headers: { 'X-Sync-Token': token },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          return json.data;
+        }
+      }
+    } catch {
+      //
+    }
+    return [];
+  },
+
+  /**
+   * تبدیل یک پیامک در انتظار به تراکنش قطعی حسابداری
+   */
+  async convertSmsToTransaction(
+    smsId: string,
+    data: {
+      fromAccountId?: string;
+      toAccountId?: string;
+      amount?: number;
+      description?: string;
+      transactionDate?: string;
+    }
+  ): Promise<boolean> {
+    try {
+      const token = getSyncToken();
+      const res = await fetch(`${API_BASE}/sms/${smsId}/convert`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Sync-Token': token,
+        },
+        body: JSON.stringify(data),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        return Boolean(json.success);
+      }
+    } catch {
+      //
+    }
+    return false;
+  },
+
+  /**
+   * نادیده گرفتن پیامک صف انتظار
+   */
+  async ignoreSms(smsId: string): Promise<boolean> {
+    try {
+      const token = getSyncToken();
+      const res = await fetch(`${API_BASE}/sms/${smsId}/ignore`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Sync-Token': token,
+        },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        return Boolean(json.success);
+      }
     } catch {
       //
     }

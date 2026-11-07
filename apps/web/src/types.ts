@@ -1,6 +1,7 @@
 export interface Account {
   id: string;
   userId: string;
+  parentId?: string | null;
   name: string;
   type: 'bank' | 'wallet' | 'savings' | 'credit' | 'debt' | 'counterparty' | 'expense' | 'income';
   bankName?: string;
@@ -15,6 +16,7 @@ export interface Account {
   isDestination?: boolean;
   isArchived?: boolean;
   createdAt?: string;
+  children?: Account[];
   recentTransactions?: Transaction[];
 }
 
@@ -80,6 +82,19 @@ export interface Category {
   color?: string;
   type?: 'expense' | 'income' | 'transfer';
   isIncome?: boolean;
+}
+
+export interface PendingSms {
+  id: string;
+  smsHash: string;
+  sender?: string;
+  rawText: string;
+  bankName?: string;
+  parsedAmount?: number;
+  parsedAccount?: string;
+  status: 'pending' | 'processed' | 'ignored';
+  receivedAt?: string;
+  createdAt?: string;
 }
 
 export interface GroupMember {

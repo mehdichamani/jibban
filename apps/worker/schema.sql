@@ -28,6 +28,7 @@ CREATE INDEX IF NOT EXISTS idx_fiscal_years_user ON fiscal_years(user_id);
 CREATE TABLE IF NOT EXISTS accounts (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
+    parent_id TEXT,                    -- کلید والد برای ساختار درختی پارمیس (Ac_parent_id)
     name TEXT NOT NULL,                -- نام حساب (بلوبانک، سوپرمارکت، حقوق، سینا و...)
     type TEXT CHECK(type IN ('bank', 'wallet', 'savings', 'credit', 'debt', 'expense', 'income')) DEFAULT 'bank',
     bank_name TEXT,                    -- نام بانک
@@ -40,9 +41,11 @@ CREATE TABLE IF NOT EXISTS accounts (
     icon TEXT DEFAULT 'landmark',
     is_archived BOOLEAN DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id)
+    FOREIGN KEY(user_id) REFERENCES users(id),
+    FOREIGN KEY(parent_id) REFERENCES accounts(id)
 );
 CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id);
+CREATE INDEX IF NOT EXISTS idx_accounts_parent ON accounts(parent_id);
 
 -- ۴. مانده اول دوره حساب‌ها به تفکیک سال مالی (RemainedAccount - مشابه پارمیس)
 CREATE TABLE IF NOT EXISTS fiscal_remained_accounts (
@@ -87,7 +90,7 @@ CREATE TABLE IF NOT EXISTS counterparties (
 );
 CREATE INDEX IF NOT EXISTS idx_counterparties_user ON counterparties(user_id);
 
--- ۷. پیامک‌های خام بانکی (Raw SMS Archive)
+-- ۷. پیامک‌های خام بانکی (Raw SMS Archive & Inbox Queue)
 CREATE TABLE IF NOT EXISTS raw_sms (
     id TEXT PRIMARY KEY,
     sms_hash TEXT UNIQUE NOT NULL,
@@ -97,7 +100,7 @@ CREATE TABLE IF NOT EXISTS raw_sms (
     bank_name TEXT,
     parsed_amount INTEGER,             -- مبلغ استخراج شده به ریال
     parsed_account TEXT,
-    status TEXT CHECK(status IN ('processed', 'ignored', 'manual')) DEFAULT 'processed',
+    status TEXT CHECK(status IN ('pending', 'processed', 'ignored', 'manual')) DEFAULT 'pending',
     transaction_id TEXT,
     received_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -105,6 +108,7 @@ CREATE TABLE IF NOT EXISTS raw_sms (
 );
 CREATE INDEX IF NOT EXISTS idx_raw_sms_hash ON raw_sms(sms_hash);
 CREATE INDEX IF NOT EXISTS idx_raw_sms_user ON raw_sms(user_id);
+CREATE INDEX IF NOT EXISTS idx_raw_sms_status ON raw_sms(status);
 
 -- ۸. سربرگ اسناد و تراکنش‌های مالی (Transactions / Activities Header)
 CREATE TABLE IF NOT EXISTS transactions (

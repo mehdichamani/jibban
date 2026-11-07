@@ -1,659 +1,388 @@
 import { Hono } from 'hono';
-import { calculateEqualSplits } from '@jibban/debt-engine';
 import { Bindings, Variables, Transaction, TransactionItem } from '../types.js';
 
 export const transactionsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 /**
- * دریافت لیست تراکنش‌ها با فیلتر سال مالی، دسته‌بندی، نوع، حساب مبدا یا مقصد، طرف‌حساب، تگ و بازه زمانی
+ * دریافت لیست تراکنش‌ها مستقیماً از Activity پارمیس
  */
 transactionsRouter.get('/', async (c) => {
-  const userId = c.get('userId');
+  const typeFilter = c.req.query('type'); // 'debit' | 'credit' | 'transfer' | 'compound'
+  const accountId = c.req.query('accountId');
   const fiscalYearId = c.req.query('fiscalYearId');
-  const type = c.req.query('type'); // 'debit' | 'credit' | 'transfer' | 'compound'
-  const categoryId = c.req.query('categoryId');
-  const accountId = c.req.query('accountId'); // فیلتر تراکنش‌های یک حساب (مبدا یا مقصد یا در اقلام)
-  const fromAccountId = c.req.query('fromAccountId');
-  const toAccountId = c.req.query('toAccountId');
-  const counterpartyId = c.req.query('counterpartyId');
-  const tag = c.req.query('tag');
-  const startDate = c.req.query('startDate');
-  const endDate = c.req.query('endDate');
-  const limit = Math.min(1000, parseInt(c.req.query('limit') || '1000', 10));
+  const limit = Math.min(1000, parseInt(c.req.query('limit') || '500', 10));
   const offset = parseInt(c.req.query('offset') || '0', 10);
 
+  // کوئری جامع استخراج اسناد از Activity به همراه نام حساب‌ها
   let query = `
     SELECT 
-      t.id, t.user_id as userId, t.fiscal_year_id as fiscalYearId, t.type, t.amount,
-      t.from_account_id as fromAccountId, t.to_account_id as toAccountId,
-      t.category_id as categoryId, t.counterparty_id as counterpartyId,
-      t.description, t.tag, t.raw_sms_id as rawSmsId,
-      t.transaction_date as transactionDate, t.shamsi_date as shamsiDate, t.time,
-      t.is_compound as isCompound, t.created_at as createdAt,
-      c.name as categoryName, c.icon as categoryIcon, c.color as categoryColor,
-      fa.name as fromAccountName, fa.color as fromAccountColor, fa.icon as fromAccountIcon, fa.bank_name as fromAccountBankName,
-      ta.name as toAccountName, ta.color as toAccountColor, ta.icon as toAccountIcon, ta.bank_name as toAccountBankName,
-      cp.name as counterpartyName
-    FROM transactions t
-    LEFT JOIN categories c ON t.category_id = c.id
-    LEFT JOIN accounts fa ON t.from_account_id = fa.id
-    LEFT JOIN accounts ta ON t.to_account_id = ta.id
-    LEFT JOIN counterparties cp ON t.counterparty_id = cp.id
-    WHERE t.user_id = ?
+      act.Act_id as id,
+      act.Act_amount as amount,
+      act.Act_date as shamsiDate,
+      act.Act_time as time,
+      act.Act_info as description,
+      act.Act_multiId as multiId,
+      act.Act_multiType as multiType,
+      act.Act_Fiscal_id as fiscalYearId,
+      act.Act_pay_Root_id as payRootId,
+      act.Act_rec_Root_id as recRootId,
+      CASE 
+        WHEN act.Act_multiType = 1 THEN 'compound'
+        WHEN act.Act_pay_Root_id = 1 THEN 'debit'
+        WHEN act.Act_rec_Root_id = 2 THEN 'credit'
+        ELSE 'transfer'
+      END as inferredType,
+      CASE 
+        WHEN act.Act_accRecive_id > 0 THEN act.Act_accRecive_id
+        WHEN act.Act_rec_Subacc_id > 0 THEN act.Act_rec_Subacc_id
+        WHEN act.Act_rec_Root_id > 0 THEN act.Act_rec_Root_id
+        ELSE NULL
+      END as fromAccountId,
+      CASE 
+        WHEN act.Act_accPay_id > 0 THEN act.Act_accPay_id
+        WHEN act.Act_pay_Subacc_id > 0 THEN act.Act_pay_Subacc_id
+        WHEN act.Act_pay_Root_id > 0 THEN act.Act_pay_Root_id
+        ELSE NULL
+      END as toAccountId,
+      fromAcc.Ac_title as fromAccountName,
+      toAcc.Ac_title as toAccountName
+    FROM Activity act
+    LEFT JOIN accounts fromAcc ON fromAcc.Ac_id = (
+      CASE 
+        WHEN act.Act_accRecive_id > 0 THEN act.Act_accRecive_id
+        WHEN act.Act_rec_Subacc_id > 0 THEN act.Act_rec_Subacc_id
+        WHEN act.Act_rec_Root_id > 0 THEN act.Act_rec_Root_id
+        ELSE NULL
+      END
+    )
+    LEFT JOIN accounts toAcc ON toAcc.Ac_id = (
+      CASE 
+        WHEN act.Act_accPay_id > 0 THEN act.Act_accPay_id
+        WHEN act.Act_pay_Subacc_id > 0 THEN act.Act_pay_Subacc_id
+        WHEN act.Act_pay_Root_id > 0 THEN act.Act_pay_Root_id
+        ELSE NULL
+      END
+    )
+    WHERE (act.Act_multiType != 2 OR act.Act_multiType IS NULL)
   `;
 
-  const params: unknown[] = [userId];
+  const params: unknown[] = [];
 
   if (fiscalYearId) {
-    query += ` AND t.fiscal_year_id = ?`;
-    params.push(fiscalYearId);
-  }
-  if (type) {
-    query += ` AND t.type = ?`;
-    params.push(type);
-  }
-  if (categoryId) {
-    query += ` AND (t.category_id = ? OR EXISTS (SELECT 1 FROM transaction_items ti WHERE ti.transaction_id = t.id AND ti.category_id = ?))`;
-    params.push(categoryId, categoryId);
-  }
-  if (accountId) {
-    query += ` AND (t.from_account_id = ? OR t.to_account_id = ? OR EXISTS (SELECT 1 FROM transaction_items ti WHERE ti.transaction_id = t.id AND ti.account_id = ?))`;
-    params.push(accountId, accountId, accountId);
-  }
-  if (fromAccountId) {
-    query += ` AND t.from_account_id = ?`;
-    params.push(fromAccountId);
-  }
-  if (toAccountId) {
-    query += ` AND t.to_account_id = ?`;
-    params.push(toAccountId);
-  }
-  if (counterpartyId) {
-    query += ` AND (t.counterparty_id = ? OR EXISTS (SELECT 1 FROM transaction_items ti WHERE ti.transaction_id = t.id AND ti.counterparty_id = ?))`;
-    params.push(counterpartyId, counterpartyId);
-  }
-  if (tag) {
-    query += ` AND t.tag = ?`;
-    params.push(tag);
-  }
-  if (startDate) {
-    query += ` AND t.transaction_date >= ?`;
-    params.push(startDate);
-  }
-  if (endDate) {
-    query += ` AND t.transaction_date <= ?`;
-    params.push(endDate);
+    query += ` AND act.Act_Fiscal_id = ?`;
+    params.push(Number(fiscalYearId));
   }
 
-  query += ` ORDER BY t.transaction_date DESC, t.time DESC, t.created_at DESC LIMIT ? OFFSET ?`;
+  if (accountId) {
+    const accNum = Number(accountId);
+    query += ` AND (
+      act.Act_accRecive_id = ? OR act.Act_rec_Subacc_id = ? OR act.Act_rec_Root_id = ? OR
+      act.Act_accPay_id = ? OR act.Act_pay_Subacc_id = ? OR act.Act_pay_Root_id = ?
+    )`;
+    params.push(accNum, accNum, accNum, accNum, accNum, accNum);
+  }
+
+  query += ` ORDER BY act.Act_date DESC, act.Act_time DESC, act.Act_id DESC LIMIT ? OFFSET ?`;
   params.push(limit, offset);
 
-  const { results } = await c.env.DB.prepare(query).bind(...params).all<Transaction>();
-  const txList = (results || []) as Transaction[];
+  const { results } = await c.env.DB.prepare(query).bind(...params).all<any>();
+  const rawList = results || [];
 
-  // الحاق آیتم‌های تراکنش‌های مرکب
-  const compoundIds = txList
-    .filter(t => t.isCompound || t.is_compound || t.type === 'compound')
-    .map(t => t.id);
+  // پیدا کردن سندهای مرکب برای الحاق اقلام (multiType = 2)
+  const compoundMultiIds = rawList
+    .filter(row => row.multiId > 0 && row.multiType === 1)
+    .map(row => Number(row.multiId));
 
-  if (compoundIds.length > 0) {
-    const placeholders = compoundIds.map(() => '?').join(',');
-    const itemsRes = await c.env.DB.prepare(`
+  const itemsByMultiId = new Map<number, TransactionItem[]>();
+
+  if (compoundMultiIds.length > 0) {
+    const placeholders = compoundMultiIds.map(() => '?').join(',');
+    const itemQuery = `
       SELECT 
-        ti.id, ti.transaction_id as transactionId, ti.user_id as userId,
-        ti.entry_type as entryType, ti.account_id as accountId,
-        ti.category_id as categoryId, ti.counterparty_id as counterpartyId,
-        ti.amount, ti.description, ti.created_at as createdAt,
-        a.name as accountName, cp.name as counterpartyName
-      FROM transaction_items ti
-      LEFT JOIN accounts a ON ti.account_id = a.id
-      LEFT JOIN counterparties cp ON ti.counterparty_id = cp.id
-      WHERE ti.transaction_id IN (${placeholders})
-    `).bind(...compoundIds).all<TransactionItem>();
-
-    const itemsMap = new Map<string, TransactionItem[]>();
-    for (const item of (itemsRes.results || [])) {
-      const txId = (item as any).transactionId || (item as any).transaction_id;
-      const list = itemsMap.get(txId) || [];
-      list.push(item);
-      itemsMap.set(txId, list);
-    }
-
-    for (const tx of txList) {
-      if (itemsMap.has(tx.id)) {
-        tx.items = itemsMap.get(tx.id);
-        // اگر تراکنش چند مقصدی است و toAccountName خالی است، نام حساب‌های مقصد را الحاق کن
-        const destinations = tx.items?.filter(i => i.entryType === 'destination' && i.accountName);
-        if (!tx.toAccountName && destinations && destinations.length > 0) {
-          tx.toAccountName = destinations.map(d => d.accountName).join('، ');
-        }
-        // اگر تراکنش چند مبدایی است و fromAccountName خالی است
-        const sources = tx.items?.filter(i => i.entryType === 'source' && i.accountName);
-        if (!tx.fromAccountName && sources && sources.length > 0) {
-          tx.fromAccountName = sources.map(s => s.accountName).join('، ');
-        }
+        act.Act_id as id,
+        act.Act_multiId as multiId,
+        act.Act_amount as amount,
+        act.Act_info as description,
+        CASE 
+          WHEN act.Act_accPay_id > 0 THEN act.Act_accPay_id
+          WHEN act.Act_pay_Subacc_id > 0 THEN act.Act_pay_Subacc_id
+          ELSE NULL
+        END as toAccountId,
+        acc.Ac_title as toAccountName
+      FROM Activity act
+      LEFT JOIN accounts acc ON acc.Ac_id = (
+        CASE 
+          WHEN act.Act_accPay_id > 0 THEN act.Act_accPay_id
+          WHEN act.Act_pay_Subacc_id > 0 THEN act.Act_pay_Subacc_id
+          ELSE NULL
+        END
+      )
+      WHERE act.Act_multiType = 2 AND act.Act_multiId IN (${placeholders})
+      ORDER BY act.Act_id ASC
+    `;
+    const itemRes = await c.env.DB.prepare(itemQuery).bind(...compoundMultiIds).all<any>();
+    (itemRes.results || []).forEach((row: any) => {
+      const mId = Number(row.multiId);
+      if (!itemsByMultiId.has(mId)) {
+        itemsByMultiId.set(mId, []);
       }
-    }
+      itemsByMultiId.get(mId)!.push({
+        id: String(row.id),
+        amount: Math.round(Number(row.amount || 0)),
+        description: row.description || undefined,
+        accountId: row.toAccountId ? String(row.toAccountId) : null,
+        accountName: row.toAccountName || undefined,
+        categoryName: row.toAccountName || undefined,
+      });
+    });
   }
 
-  return c.json({
-    success: true,
-    data: txList,
+  // مپینگ نهایی به مدل Transaction فرانت‌اند
+  const transactions: Transaction[] = rawList.map((row: any) => {
+    const isCompound = row.inferredType === 'compound' || (row.multiId > 0 && row.multiType === 1);
+    const items = isCompound ? (itemsByMultiId.get(Number(row.multiId)) || []) : undefined;
+
+    return {
+      id: String(row.id),
+      userId: 'user_default',
+      fiscalYearId: row.fiscalYearId ? String(row.fiscalYearId) : '3',
+      type: isCompound ? 'compound' : row.inferredType,
+      amount: Math.round(Number(row.amount || 0)),
+      fromAccountId: row.fromAccountId ? String(row.fromAccountId) : null,
+      fromAccountName: row.fromAccountName || (row.inferredType === 'credit' ? 'درآمد' : undefined),
+      toAccountId: row.toAccountId ? String(row.toAccountId) : null,
+      toAccountName: row.toAccountName || (isCompound ? 'چند مقصدی' : undefined),
+      categoryName: row.inferredType === 'debit' ? row.toAccountName : (row.inferredType === 'credit' ? row.toAccountName : undefined),
+      description: row.description || '',
+      shamsiDate: row.shamsiDate || '',
+      transactionDate: row.shamsiDate ? row.shamsiDate.replace(/\//g, '-') : '',
+      time: row.time || '',
+      isCompound,
+      items,
+      createdAt: `${row.shamsiDate || '1405-01-01'}T${row.time || '12:00'}:00.000Z`,
+    };
   });
+
+  if (typeFilter) {
+    return c.json({
+      success: true,
+      data: transactions.filter(t => t.type === typeFilter),
+    });
+  }
+
+  return c.json({ success: true, data: transactions });
 });
 
 /**
- * ثبت تراکنش جدید (تک‌مبدا/تک‌مقصد یا مرکب به سبک پارمیس)
+ * ثبت تراکنش جدید (ساده یا چند حسابی مرکب) در جدول Activity
  */
 transactionsRouter.post('/', async (c) => {
-  const userId = c.get('userId');
   const body = await c.req.json<{
+    type?: 'debit' | 'credit' | 'transfer' | 'compound';
     amount: number;
-    type: 'debit' | 'credit' | 'transfer' | 'compound';
-    fiscalYearId?: string | null;
-    fromAccountId?: string | null;
-    toAccountId?: string | null;
-    categoryId?: string | null;
-    counterpartyId?: string | null;
-    description?: string | null;
-    tag?: string | null;
-    rawSmsId?: string | null;
-    transactionDate?: string;
-    shamsiDate?: string | null;
-    time?: string | null;
+    fromAccountId?: string | number;
+    toAccountId?: string | number;
+    description?: string;
+    shamsiDate?: string;
+    time?: string;
+    isCompound?: boolean;
     items?: Array<{
-      entryType: 'source' | 'destination';
-      accountId?: string | null;
-      categoryId?: string | null;
-      counterpartyId?: string | null;
+      accountId: string | number;
       amount: number;
-      description?: string | null;
+      description?: string;
     }>;
   }>();
 
-  if (!body.amount || body.amount <= 0 || !body.type) {
-    return c.json({ success: false, error: 'مبلغ به ریال و نوع تراکنش الزامی است' }, 400);
+  if (!body.amount || body.amount <= 0) {
+    return c.json({ success: false, error: 'مبلغ تراکنش باید بزرگتر از صفر باشد' }, 400);
   }
 
-  const id = `tx_${crypto.randomUUID()}`;
-  const amount = Math.round(body.amount);
-  const transactionDate = body.transactionDate || new Date().toISOString();
-  const time = body.time || new Date().toTimeString().slice(0, 8);
-  const fromAccountId = body.fromAccountId ?? null;
-  const toAccountId = body.toAccountId ?? null;
-  const categoryId = body.categoryId ?? null;
-  const counterpartyId = body.counterpartyId ?? null;
-  const isCompound = (body.items && body.items.length > 0) || body.type === 'compound' ? 1 : 0;
+  // تاریخ و ساعت شمسی پیش‌فرض
+  const now = new Date();
+  const time = body.time || `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const shamsiDate = body.shamsiDate || '1405/08/15';
 
-  let fiscalYearId = body.fiscalYearId ?? null;
-  if (!fiscalYearId) {
-    const activeFy = await c.env.DB.prepare('SELECT id FROM fiscal_years WHERE user_id = ? AND is_active = 1 LIMIT 1')
-      .bind(userId)
-      .first<{ id: string }>();
-    fiscalYearId = activeFy?.id ?? 'fiscal_3';
-  }
+  const maxActRow = await c.env.DB.prepare('SELECT MAX(Act_id) as maxId FROM Activity').first<{ maxId: number }>();
+  let nextActId = (maxActRow?.maxId || 5550) + 1;
 
-  const statements: D1PreparedStatement[] = [];
-
-  statements.push(
-    c.env.DB.prepare(
-      `INSERT INTO transactions (
-        id, user_id, fiscal_year_id, type, amount, from_account_id, to_account_id,
-        category_id, counterparty_id, description, tag, raw_sms_id,
-        transaction_date, shamsi_date, time, is_compound
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      id,
-      userId,
-      fiscalYearId,
-      body.type,
-      amount,
-      fromAccountId,
-      toAccountId,
-      categoryId,
-      counterpartyId,
-      body.description ?? null,
-      body.tag ?? null,
-      body.rawSmsId ?? null,
-      transactionDate,
-      body.shamsiDate ?? null,
-      time,
-      isCompound
-    )
-  );
+  const isCompound = body.type === 'compound' || body.isCompound || (body.items && body.items.length > 1);
 
   if (isCompound && body.items && body.items.length > 0) {
-    for (const it of body.items) {
-      const itId = `txi_${crypto.randomUUID()}`;
-      const itAmt = Math.round(it.amount);
-      statements.push(
-        c.env.DB.prepare(
-          `INSERT INTO transaction_items (
-            id, transaction_id, user_id, entry_type, account_id, category_id, counterparty_id, amount, description
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        ).bind(
-          itId,
-          id,
-          userId,
-          it.entryType,
-          it.accountId ?? null,
-          it.categoryId ?? null,
-          it.counterpartyId ?? null,
-          itAmt,
-          it.description ?? null
-        )
-      );
+    // سند چند مقصدی / مرکب
+    const maxMultiRow = await c.env.DB.prepare('SELECT MAX(MultiId) as maxMId FROM MultiActivity').first<{ maxMId: number }>();
+    const nextMultiId = (maxMultiRow?.maxMId || 440) + 1;
 
-      if (it.accountId) {
-        if (it.entryType === 'source') {
-          statements.push(
-            c.env.DB.prepare('UPDATE accounts SET balance = balance - ? WHERE id = ? AND user_id = ?')
-              .bind(itAmt, it.accountId, userId)
-          );
-        } else {
-          statements.push(
-            c.env.DB.prepare('UPDATE accounts SET balance = balance + ? WHERE id = ? AND user_id = ?')
-              .bind(itAmt, it.accountId, userId)
-          );
-        }
-      }
+    // ۱. ثبت در MultiActivity
+    await c.env.DB.prepare(
+      'INSERT INTO MultiActivity (MultiId, Date, Time, Info, Serial, Type) VALUES (?, ?, ?, ?, ?, 1)'
+    ).bind(nextMultiId, shamsiDate, time, body.description || '', nextActId).run();
 
-      if (it.counterpartyId) {
-        const cpDelta = it.entryType === 'destination' ? itAmt : -itAmt;
-        statements.push(
-          c.env.DB.prepare('UPDATE counterparties SET balance = balance + ? WHERE id = ? AND user_id = ?')
-            .bind(cpDelta, it.counterpartyId, userId)
-        );
-      }
+    // ۲. ثبت رکورد سربرگ در Activity (نوع ۱)
+    const fromAccId = Number(body.fromAccountId) || 173;
+    await c.env.DB.prepare(
+      `INSERT INTO Activity (
+        Act_id, Act_amount, Act_date, Act_time, Act_info,
+        Act_rec_Subacc_id, Act_rec_Root_id, Act_pay_Root_id, Act_accPay_id,
+        Act_multiId, Act_multiType, Act_Fiscal_id, Act_iscash, Act_set
+      ) VALUES (?, ?, ?, ?, ?, ?, 4, -1, -1, ?, 1, 3, 1, 1)`
+    ).bind(
+      nextActId,
+      body.amount,
+      shamsiDate,
+      time,
+      body.description || '',
+      fromAccId,
+      nextMultiId
+    ).run();
+
+    // به‌روزرسانی مانده حساب مبدا
+    await c.env.DB.prepare(
+      'UPDATE accounts SET Ac_balance = Ac_balance - ? WHERE Ac_id = ?'
+    ).bind(body.amount, fromAccId).run();
+
+    // ۳. ثبت اقلام ریزهزینه (نوع ۲)
+    for (const item of body.items) {
+      nextActId++;
+      const itemAccId = Number(item.accountId);
+      await c.env.DB.prepare(
+        `INSERT INTO Activity (
+          Act_id, Act_amount, Act_date, Act_time, Act_info,
+          Act_accPay_id, Act_pay_Root_id, Act_rec_Root_id,
+          Act_multiId, Act_multiType, Act_Fiscal_id, Act_iscash, Act_set
+        ) VALUES (?, ?, ?, ?, ?, ?, 1, -1, ?, 2, 3, 1, 1)`
+      ).bind(
+        nextActId,
+        item.amount,
+        shamsiDate,
+        time,
+        item.description || body.description || '',
+        itemAccId,
+        nextMultiId
+      ).run();
+
+      // افزایش هزینه مربوطه
+      await c.env.DB.prepare(
+        'UPDATE accounts SET Ac_balance = Ac_balance + ? WHERE Ac_id = ?'
+      ).bind(item.amount, itemAccId).run();
     }
-  } else {
-    if (fromAccountId && (body.type === 'debit' || body.type === 'transfer')) {
-      statements.push(
-        c.env.DB.prepare('UPDATE accounts SET balance = balance - ? WHERE id = ? AND user_id = ?')
-          .bind(amount, fromAccountId, userId)
-      );
-    }
-    if (toAccountId && (body.type === 'credit' || body.type === 'transfer')) {
-      statements.push(
-        c.env.DB.prepare('UPDATE accounts SET balance = balance + ? WHERE id = ? AND user_id = ?')
-          .bind(amount, toAccountId, userId)
-      );
-    }
-    if (counterpartyId) {
-      const cpDelta = body.type === 'debit' ? amount : body.type === 'credit' ? -amount : 0;
-      if (cpDelta !== 0) {
-        statements.push(
-          c.env.DB.prepare('UPDATE counterparties SET balance = balance + ? WHERE id = ? AND user_id = ?')
-            .bind(cpDelta, counterpartyId, userId)
-        );
-      }
-    }
+
+    return c.json({
+      success: true,
+      data: {
+        id: String(nextActId - body.items.length),
+        amount: body.amount,
+        type: 'compound',
+        multiId: nextMultiId,
+      },
+    }, 201);
   }
 
-  await c.env.DB.batch(statements);
+  // سند ساده (هزینه، درآمد، انتقال)
+  const txType = body.type || 'debit';
+  let payRoot = -1;
+  let recRoot = -1;
+  let payAcc = -1;
+  let recAcc = -1;
+
+  if (txType === 'debit') {
+    // برداشت از بانک/صندوق به حساب هزینه
+    recRoot = 4;
+    recAcc = Number(body.fromAccountId) || 173;
+    payRoot = 1;
+    payAcc = Number(body.toAccountId) || 51;
+  } else if (txType === 'credit') {
+    // درآمد به حساب بانک/صندوق
+    recRoot = 4;
+    recAcc = Number(body.toAccountId) || 173;
+    payRoot = 2;
+    payAcc = Number(body.fromAccountId) || 36;
+  } else {
+    // انتقال بین بانکی
+    recRoot = 4;
+    recAcc = Number(body.fromAccountId) || 173;
+    payRoot = 4;
+    payAcc = Number(body.toAccountId) || 174;
+  }
+
+  await c.env.DB.prepare(
+    `INSERT INTO Activity (
+      Act_id, Act_amount, Act_date, Act_time, Act_info,
+      Act_rec_Subacc_id, Act_rec_Root_id, Act_accPay_id, Act_pay_Root_id,
+      Act_multiId, Act_multiType, Act_Fiscal_id, Act_iscash, Act_set
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 3, 1, 1)`
+  ).bind(
+    nextActId,
+    body.amount,
+    shamsiDate,
+    time,
+    body.description || '',
+    recAcc,
+    recRoot,
+    payAcc,
+    payRoot
+  ).run();
+
+  // اعمال اثر بر مانده حساب‌ها
+  if (txType === 'debit') {
+    await c.env.DB.prepare('UPDATE accounts SET Ac_balance = Ac_balance - ? WHERE Ac_id = ?').bind(body.amount, recAcc).run();
+  } else if (txType === 'credit') {
+    await c.env.DB.prepare('UPDATE accounts SET Ac_balance = Ac_balance + ? WHERE Ac_id = ?').bind(body.amount, recAcc).run();
+  } else if (txType === 'transfer') {
+    await c.env.DB.prepare('UPDATE accounts SET Ac_balance = Ac_balance - ? WHERE Ac_id = ?').bind(body.amount, recAcc).run();
+    await c.env.DB.prepare('UPDATE accounts SET Ac_balance = Ac_balance + ? WHERE Ac_id = ?').bind(body.amount, payAcc).run();
+  }
 
   return c.json({
     success: true,
     data: {
-      id,
-      userId,
-      fiscalYearId,
-      type: body.type,
-      amount,
-      fromAccountId,
-      toAccountId,
-      categoryId,
-      counterpartyId,
-      description: body.description,
-      tag: body.tag,
-      rawSmsId: body.rawSmsId,
-      transactionDate,
-      shamsiDate: body.shamsiDate,
+      id: String(nextActId),
+      amount: body.amount,
+      type: txType,
+      shamsiDate,
       time,
-      isCompound,
     },
   }, 201);
 });
 
 /**
- * ویرایش / اصلاح تراکنش مالی (تک‌مبدا، تک‌مقصد یا مرکب)
- */
-transactionsRouter.put('/:id', async (c) => {
-  const id = c.req.param('id');
-  const userId = c.get('userId');
-  const body = await c.req.json<{
-    amount?: number;
-    type?: 'debit' | 'credit' | 'transfer' | 'compound';
-    fromAccountId?: string | null;
-    toAccountId?: string | null;
-    categoryId?: string | null;
-    counterpartyId?: string | null;
-    description?: string | null;
-    tag?: string | null;
-    transactionDate?: string;
-    shamsiDate?: string | null;
-  }>();
-
-  const oldTx = await c.env.DB.prepare('SELECT * FROM transactions WHERE id = ? AND user_id = ?')
-    .bind(id, userId)
-    .first<any>();
-
-  if (!oldTx) {
-    return c.json({ success: false, error: 'تراکنش پیدا نشد' }, 404);
-  }
-
-  const revertStatements: D1PreparedStatement[] = [];
-
-  // برگشت اثر مالی قدیمی
-  if (oldTx.from_account_id && (oldTx.type === 'debit' || oldTx.type === 'transfer')) {
-    revertStatements.push(
-      c.env.DB.prepare('UPDATE accounts SET balance = balance + ? WHERE id = ? AND user_id = ?')
-        .bind(oldTx.amount, oldTx.from_account_id, userId)
-    );
-  }
-  if (oldTx.to_account_id && (oldTx.type === 'credit' || oldTx.type === 'transfer')) {
-    revertStatements.push(
-      c.env.DB.prepare('UPDATE accounts SET balance = balance - ? WHERE id = ? AND user_id = ?')
-        .bind(oldTx.amount, oldTx.to_account_id, userId)
-    );
-  }
-  if (oldTx.counterparty_id) {
-    const cpDelta = oldTx.type === 'debit' ? -oldTx.amount : oldTx.type === 'credit' ? oldTx.amount : 0;
-    if (cpDelta !== 0) {
-      revertStatements.push(
-        c.env.DB.prepare('UPDATE counterparties SET balance = balance + ? WHERE id = ? AND user_id = ?')
-          .bind(cpDelta, oldTx.counterparty_id, userId)
-      );
-    }
-  }
-
-  // داده‌های جدید
-  const newAmount = body.amount !== undefined ? Math.round(body.amount) : oldTx.amount;
-  const newType = body.type ?? oldTx.type;
-  const newFromAcc = body.fromAccountId !== undefined ? body.fromAccountId : oldTx.from_account_id;
-  const newToAcc = body.toAccountId !== undefined ? body.toAccountId : oldTx.to_account_id;
-  const newCat = body.categoryId !== undefined ? body.categoryId : oldTx.category_id;
-  const newCp = body.counterpartyId !== undefined ? body.counterpartyId : oldTx.counterparty_id;
-  const newDesc = body.description !== undefined ? body.description : oldTx.description;
-  const newTag = body.tag !== undefined ? body.tag : oldTx.tag;
-  const newDate = body.transactionDate ?? oldTx.transaction_date;
-  const newShamsi = body.shamsiDate !== undefined ? body.shamsiDate : oldTx.shamsi_date;
-
-  revertStatements.push(
-    c.env.DB.prepare(
-      `UPDATE transactions SET 
-        amount = ?, type = ?, from_account_id = ?, to_account_id = ?,
-        category_id = ?, counterparty_id = ?, description = ?, tag = ?,
-        transaction_date = ?, shamsi_date = ?
-       WHERE id = ? AND user_id = ?`
-    ).bind(
-      newAmount,
-      newType,
-      newFromAcc,
-      newToAcc,
-      newCat,
-      newCp,
-      newDesc,
-      newTag,
-      newDate,
-      newShamsi,
-      id,
-      userId
-    )
-  );
-
-  // اعمال اثر مالی جدید
-  if (newFromAcc && (newType === 'debit' || newType === 'transfer')) {
-    revertStatements.push(
-      c.env.DB.prepare('UPDATE accounts SET balance = balance - ? WHERE id = ? AND user_id = ?')
-        .bind(newAmount, newFromAcc, userId)
-    );
-  }
-  if (newToAcc && (newType === 'credit' || newType === 'transfer')) {
-    revertStatements.push(
-      c.env.DB.prepare('UPDATE accounts SET balance = balance + ? WHERE id = ? AND user_id = ?')
-        .bind(newAmount, newToAcc, userId)
-    );
-  }
-  if (newCp) {
-    const cpDelta = newType === 'debit' ? newAmount : newType === 'credit' ? -newAmount : 0;
-    if (cpDelta !== 0) {
-      revertStatements.push(
-        c.env.DB.prepare('UPDATE counterparties SET balance = balance + ? WHERE id = ? AND user_id = ?')
-          .bind(cpDelta, newCp, userId)
-      );
-    }
-  }
-
-  await c.env.DB.batch(revertStatements);
-
-  return c.json({
-    success: true,
-    data: {
-      id,
-      amount: newAmount,
-      type: newType,
-      fromAccountId: newFromAcc,
-      toAccountId: newToAcc,
-      categoryId: newCat,
-      counterpartyId: newCp,
-      description: newDesc,
-      tag: newTag,
-      transactionDate: newDate,
-      shamsiDate: newShamsi,
-    },
-  });
-});
-
-/**
- * دریافت جزئیات یک تراکنش همراه با ریز اقلام
+ * دریافت جزئیات یک سند
  */
 transactionsRouter.get('/:id', async (c) => {
-  const id = c.req.param('id');
-  const userId = c.get('userId');
+  const id = Number(c.req.param('id'));
+  if (isNaN(id)) return c.json({ success: false, error: 'شناسه سند نامعتبر است' }, 400);
 
-  const tx = await c.env.DB.prepare(
-    `SELECT 
-      t.*,
-      c.name as categoryName, c.icon as categoryIcon, c.color as categoryColor,
-      fa.name as fromAccountName, fa.color as fromAccountColor, fa.icon as fromAccountIcon,
-      ta.name as toAccountName, ta.color as toAccountColor, ta.icon as toAccountIcon,
-      cp.name as counterpartyName
-     FROM transactions t
-     LEFT JOIN categories c ON t.category_id = c.id
-     LEFT JOIN accounts fa ON t.from_account_id = fa.id
-     LEFT JOIN accounts ta ON t.to_account_id = ta.id
-     LEFT JOIN counterparties cp ON t.counterparty_id = cp.id
-     WHERE t.id = ? AND t.user_id = ?`
-  )
-    .bind(id, userId)
-    .first<Transaction>();
+  const row = await c.env.DB.prepare(
+    `SELECT act.*, fromAcc.Ac_title as fromTitle, toAcc.Ac_title as toTitle
+     FROM Activity act
+     LEFT JOIN accounts fromAcc ON fromAcc.Ac_id = act.Act_rec_Subacc_id
+     LEFT JOIN accounts toAcc ON toAcc.Ac_id = act.Act_accPay_id
+     WHERE act.Act_id = ?`
+  ).bind(id).first<any>();
 
-  if (!tx) {
-    return c.json({ success: false, error: 'تراکنش پیدا نشد' }, 404);
+  if (!row) {
+    return c.json({ success: false, error: 'سند یافت نشد' }, 404);
   }
 
-  const items = await c.env.DB.prepare(`
-    SELECT 
-      ti.id, ti.transaction_id as transactionId, ti.user_id as userId,
-      ti.entry_type as entryType, ti.account_id as accountId,
-      ti.category_id as categoryId, ti.counterparty_id as counterpartyId,
-      ti.amount, ti.description, ti.created_at as createdAt,
-      a.name as accountName, c.name as categoryName, cp.name as counterpartyName
-    FROM transaction_items ti
-    LEFT JOIN accounts a ON ti.account_id = a.id
-    LEFT JOIN categories c ON ti.category_id = c.id
-    LEFT JOIN counterparties cp ON ti.counterparty_id = cp.id
-    WHERE ti.transaction_id = ?
-  `).bind(id).all<TransactionItem>();
-
-  tx.items = items.results || [];
-
-  return c.json({ success: true, data: tx });
+  return c.json({ success: true, data: row });
 });
 
 /**
- * حذف یک تراکنش با بازگرداندن دقیق مانده‌های حساب‌ها
+ * حذف یک سند
  */
 transactionsRouter.delete('/:id', async (c) => {
-  const id = c.req.param('id');
-  const userId = c.get('userId');
+  const id = Number(c.req.param('id'));
+  if (isNaN(id)) return c.json({ success: false, error: 'شناسه نامعتبر است' }, 400);
 
-  const tx = await c.env.DB.prepare(
-    'SELECT * FROM transactions WHERE id = ? AND user_id = ?'
-  )
-    .bind(id, userId)
-    .first<any>();
+  const act = await c.env.DB.prepare('SELECT * FROM Activity WHERE Act_id = ?').bind(id).first<any>();
+  if (!act) return c.json({ success: false, error: 'سند پیدا نشد' }, 404);
 
-  if (!tx) {
-    return c.json({ success: false, error: 'تراکنش پیدا نشد' }, 404);
-  }
-
-  const statements: D1PreparedStatement[] = [];
-
-  const items = await c.env.DB.prepare('SELECT * FROM transaction_items WHERE transaction_id = ?')
-    .bind(id)
-    .all<any>();
-
-  if (items.results && items.results.length > 0) {
-    for (const it of items.results) {
-      if (it.account_id) {
-        if (it.entry_type === 'source') {
-          statements.push(
-            c.env.DB.prepare('UPDATE accounts SET balance = balance + ? WHERE id = ? AND user_id = ?')
-              .bind(it.amount, it.account_id, userId)
-          );
-        } else {
-          statements.push(
-            c.env.DB.prepare('UPDATE accounts SET balance = balance - ? WHERE id = ? AND user_id = ?')
-              .bind(it.amount, it.account_id, userId)
-          );
-        }
-      }
-      if (it.counterparty_id) {
-        const cpDelta = it.entry_type === 'destination' ? -it.amount : it.amount;
-        statements.push(
-          c.env.DB.prepare('UPDATE counterparties SET balance = balance + ? WHERE id = ? AND user_id = ?')
-            .bind(cpDelta, it.counterparty_id, userId)
-        );
-      }
-    }
-    statements.push(c.env.DB.prepare('DELETE FROM transaction_items WHERE transaction_id = ?').bind(id));
+  // اگر مرکب است، همه اقلام حذف شوند
+  if (act.Act_multiId > 0) {
+    await c.env.DB.prepare('DELETE FROM Activity WHERE Act_multiId = ?').bind(act.Act_multiId).run();
+    await c.env.DB.prepare('DELETE FROM MultiActivity WHERE MultiId = ?').bind(act.Act_multiId).run();
   } else {
-    if (tx.from_account_id && (tx.type === 'debit' || tx.type === 'transfer')) {
-      statements.push(
-        c.env.DB.prepare('UPDATE accounts SET balance = balance + ? WHERE id = ? AND user_id = ?')
-          .bind(tx.amount, tx.from_account_id, userId)
-      );
-    }
-    if (tx.to_account_id && (tx.type === 'credit' || tx.type === 'transfer')) {
-      statements.push(
-        c.env.DB.prepare('UPDATE accounts SET balance = balance - ? WHERE id = ? AND user_id = ?')
-          .bind(tx.amount, tx.to_account_id, userId)
-      );
-    }
-    if (tx.counterparty_id) {
-      const cpDelta = tx.type === 'debit' ? -tx.amount : tx.type === 'credit' ? tx.amount : 0;
-      if (cpDelta !== 0) {
-        statements.push(
-          c.env.DB.prepare('UPDATE counterparties SET balance = balance + ? WHERE id = ? AND user_id = ?')
-            .bind(cpDelta, tx.counterparty_id, userId)
-        );
-      }
-    }
+    await c.env.DB.prepare('DELETE FROM Activity WHERE Act_id = ?').bind(id).run();
   }
 
-  statements.push(c.env.DB.prepare('DELETE FROM transactions WHERE id = ? AND user_id = ?').bind(id, userId));
-  await c.env.DB.batch(statements);
-
-  return c.json({ success: true, message: 'تراکنش با موفقیت حذف و مانده حساب‌ها اصلاح شد' });
-});
-
-/**
- * تبدیل یک تراکنش بانکی به خرج گروهی (دنگ)
- */
-transactionsRouter.post('/:id/to-split', async (c) => {
-  const txId = c.req.param('id');
-  const userId = c.get('userId');
-  const body = await c.req.json<{
-    groupId: string;
-    payerId?: string;
-    participantIds?: string[];
-    members?: string[];
-    description?: string;
-  }>();
-
-  if (!body.groupId) {
-    return c.json({ success: false, error: 'شناسه گروه دنگ الزامی است' }, 400);
-  }
-
-  const tx = await c.env.DB.prepare('SELECT * FROM transactions WHERE id = ?')
-    .bind(txId)
-    .first<any>();
-
-  if (!tx) {
-    return c.json({ success: false, error: 'تراکنش پیدا نشد' }, 404);
-  }
-
-  let members = body.participantIds || body.members;
-  if (!members || members.length === 0) {
-    const groupMembers = await c.env.DB.prepare(
-      'SELECT counterparty_id FROM group_members WHERE group_id = ?'
-    )
-      .bind(body.groupId)
-      .all<{ counterparty_id: string }>();
-    members = (groupMembers.results || []).map((m) => m.counterparty_id);
-  }
-
-  if (!members || members.length === 0) {
-    return c.json({ success: false, error: 'عضوی برای تقسیم دنگ در این گروه یافت نشد' }, 400);
-  }
-
-  const payerId = body.payerId || members[0] || userId;
-  const splits = calculateEqualSplits(tx.amount, members);
-  const expenseId = `ge_${crypto.randomUUID()}`;
-  const expenseDesc = body.description || tx.description || 'خرج حاصل از پیامک بانکی';
-  const statements: D1PreparedStatement[] = [];
-
-  statements.push(
-    c.env.DB.prepare(
-      `INSERT INTO group_expenses (id, group_id, payer_id, amount, description, linked_transaction_id, expense_date)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      expenseId,
-      body.groupId,
-      payerId,
-      tx.amount,
-      expenseDesc,
-      txId,
-      tx.transaction_date || new Date().toISOString()
-    )
-  );
-
-  for (const s of splits) {
-    statements.push(
-      c.env.DB.prepare(
-        `INSERT INTO expense_splits (expense_id, counterparty_id, owed_amount)
-         VALUES (?, ?, ?)`
-      ).bind(expenseId, s.userId, s.owedAmount)
-    );
-  }
-
-  statements.push(
-    c.env.DB.prepare('UPDATE transactions SET tag = ? WHERE id = ?')
-      .bind('دنگ', txId)
-  );
-
-  await c.env.DB.batch(statements);
-
-  return c.json({
-    success: true,
-    data: {
-      expenseId,
-      groupId: body.groupId,
-      amount: tx.amount,
-      description: expenseDesc,
-      splits,
-    },
-  }, 201);
+  return c.json({ success: true, message: 'سند با موفقیت حذف شد' });
 });

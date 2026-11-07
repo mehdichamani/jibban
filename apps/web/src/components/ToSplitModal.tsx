@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Transaction } from '../types.js';
 import { calculateEqualSplits, calculatePercentageSplits } from '@jibban/debt-engine';
 import { X, Sparkles, Users, Check, Percent, AlertCircle } from 'lucide-react';
 import { formatJalali } from '../lib/date.js';
+import { GroupMemberItem, getStoredGroupMembers } from '../lib/groupMembersStorage.js';
 
 interface ToSplitModalProps {
   transaction: Transaction | null;
@@ -17,21 +18,33 @@ export const ToSplitModal: React.FC<ToSplitModalProps> = ({
   onClose,
   onConfirmSplit,
 }) => {
-  if (!isOpen || !transaction) return null;
+  const [members, setMembers] = useState<GroupMemberItem[]>(getStoredGroupMembers());
 
-  const [selectedGroup, setSelectedGroup] = useState<string>('grp_home');
-  const [participants] = useState<string[]>(['من', 'رضا', 'سارا']);
+  useEffect(() => {
+    if (isOpen) {
+      setMembers(getStoredGroupMembers());
+    }
+  }, [isOpen]);
+
+  const [selectedGroup] = useState<string>('grp_home');
   const [splitType, setSplitType] = useState<'equal' | 'percentage'>('equal');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  // درصد پیش‌فرض اعضا
-  const [percentages, setPercentages] = useState<Record<string, number>>(() => {
-    return {
-      من: 34,
-      رضا: 33,
-      سارا: 33,
-    };
-  });
+  // درصدهای پویا
+  const [percentages, setPercentages] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    const count = members.length || 1;
+    const base = Math.floor(100 / count);
+    const remainder = 100 - base * count;
+    const initial: Record<string, number> = {};
+    members.forEach((m, idx) => {
+      initial[m.id] = base + (idx < remainder ? 1 : 0);
+    });
+    setPercentages(initial);
+  }, [members]);
+
+  const participants = useMemo(() => members.map((m) => m.id), [members]);
 
   const totalPercentage = useMemo(() => {
     return Object.values(percentages).reduce((sum, p) => sum + (Number(p) || 0), 0);
@@ -41,6 +54,7 @@ export const ToSplitModal: React.FC<ToSplitModalProps> = ({
 
   // محاسبه سهم هر فرد با الگوریتم debt-engine
   const splits = useMemo(() => {
+    if (!transaction?.amount) return [];
     if (splitType === 'equal') {
       return calculateEqualSplits(transaction.amount, participants);
     } else {
@@ -50,7 +64,9 @@ export const ToSplitModal: React.FC<ToSplitModalProps> = ({
       }));
       return calculatePercentageSplits(transaction.amount, pctInput);
     }
-  }, [transaction.amount, participants, splitType, percentages]);
+  }, [transaction?.amount, participants, splitType, percentages]);
+
+  if (!isOpen || !transaction) return null;
 
   const formatToman = (amount: number) => {
     return new Intl.NumberFormat('fa-IR').format(amount);
@@ -78,159 +94,132 @@ export const ToSplitModal: React.FC<ToSplitModalProps> = ({
 
   return (
     <div className="modal-backdrop">
-      <div className="modal-content p-5 sm:p-6 space-y-4 max-h-[92vh] overflow-y-auto">
-        {/* هدر */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+      <div className="glass-modal max-w-md w-full p-5 sm:p-6 space-y-5 animate-scale-up">
+        {/* هدر مودال */}
+        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
               <Sparkles className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">اشتراک‌گذاری هوشمند در دنگ</h3>
-              <p className="text-[11px] text-slate-400">تبدیل آنی خرج بانکی به سهم گروهی</p>
+              <h3 className="text-sm sm:text-base font-bold text-white">تبدیل به خرج گروهی (دنگ)</h3>
+              <p className="text-[11px] text-slate-400">سهم‌بندی خودکار بین اعضای گروه</p>
             </div>
           </div>
-
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center"
+            className="w-8 h-8 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center transition"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* کارت مشخصات تراکنش با تاریخ شمسی */}
-        <div className="glass-card p-4 bg-slate-900/80 border-purple-500/30 space-y-2">
-          <div className="flex items-center justify-between text-xs text-slate-400">
-            <span>تراکنش انتخابی:</span>
-            <span className="font-sans text-[11px] text-slate-400">
-              {formatJalali(transaction.transactionDate, 'full')}
-            </span>
+        {/* اطلاعات تراکنش شخصی انتخاب‌شده */}
+        <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-slate-400">شرح هزینه:</span>
+            <span className="font-semibold text-white">{transaction.description || 'تراکنش بدون شرح'}</span>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="font-bold text-slate-200 text-sm">
-              {transaction.description || 'خرید بانکی'} ({transaction.bankName || 'بانک'})
-            </span>
-            <span className="font-bold text-base font-mono text-purple-400">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-slate-400">مبلغ کل پرداختی:</span>
+            <span className="font-mono font-bold text-emerald-400 text-sm">
               {formatToman(transaction.amount)} تومان
             </span>
           </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-slate-400">تاریخ:</span>
+            <span className="font-mono text-slate-300">{formatJalali(transaction.transactionDate)}</span>
+          </div>
         </div>
 
-        {/* انتخاب گروه */}
-        <div>
-          <label className="text-xs font-semibold text-slate-300 block mb-1.5">
-            گروه دنگ مقصد:
-          </label>
-          <select
-            value={selectedGroup}
-            onChange={(e) => setSelectedGroup(e.target.value)}
-            className="input-field text-xs sm:text-sm"
-          >
-            <option value="grp_home">خرج‌های مشترک خانه (۳ عضو)</option>
-            <option value="grp_trip">سفر شمال (۴ عضو)</option>
-          </select>
-        </div>
-
-        {/* انتخاب شیوه تقسیم دنگ */}
-        <div className="space-y-2 pt-1 border-t border-slate-800">
+        {/* انتخاب نوع تقسیم */}
+        <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <label className="text-xs font-semibold text-slate-300">روش تسهیم:</label>
-            <div className="flex items-center gap-1 p-0.5 bg-slate-950 rounded-xl border border-slate-800">
+            <span className="text-xs font-semibold text-slate-300">نحوه تسهیم دنگ:</span>
+            <div className="flex rounded-lg bg-slate-900 p-0.5 border border-slate-800 text-xs">
               <button
                 type="button"
                 onClick={() => setSplitType('equal')}
-                className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold transition ${
-                  splitType === 'equal'
-                    ? 'bg-purple-600 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
+                className={`px-3 py-1 rounded-md transition ${
+                  splitType === 'equal' ? 'bg-purple-600 text-white font-bold' : 'text-slate-400'
                 }`}
               >
-                <Users className="w-3.5 h-3.5" />
-                <span>مساوی</span>
+                مساوی
               </button>
               <button
                 type="button"
                 onClick={() => setSplitType('percentage')}
-                className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold transition ${
-                  splitType === 'percentage'
-                    ? 'bg-purple-600 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
+                className={`px-3 py-1 rounded-md transition ${
+                  splitType === 'percentage' ? 'bg-purple-600 text-white font-bold' : 'text-slate-400'
                 }`}
               >
-                <Percent className="w-3.5 h-3.5" />
-                <span>درصدی</span>
+                درصدی
               </button>
             </div>
           </div>
 
+          {/* اعضا و سهم هر یک */}
+          <div className="space-y-2">
+            {members.map((m) => {
+              const shareAmount = splits.find((s) => s.userId === m.id)?.owedAmount ?? 0;
+              const isPayer = m.id === 'من';
+
+              return (
+                <div
+                  key={m.id}
+                  className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900/50 border border-slate-800/80 text-xs"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-slate-200">{m.name}</span>
+                    {isPayer && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-300 font-medium">
+                        پرداخت‌کننده
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 font-mono">
+                    {splitType === 'percentage' && (
+                      <div className="relative w-16">
+                        <input
+                          type="text"
+                          value={percentages[m.id] ?? 0}
+                          onChange={(e) => handlePercentageChange(m.id, e.target.value)}
+                          className="input-field text-left text-xs py-1 pl-5 pr-1.5 w-full"
+                          dir="ltr"
+                        />
+                        <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-500">٪</span>
+                      </div>
+                    )}
+                    <span className="text-white font-bold">{formatToman(shareAmount)} تومان</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
           {splitType === 'percentage' && !isPercentageValid && (
-            <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-300 flex items-center gap-1.5">
-              <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <div className="text-[11px] text-rose-400 flex items-center gap-1">
+              <AlertCircle className="w-3.5 h-3.5" />
               <span>مجموع درصدها باید دقیقاً ۱۰۰٪ باشد (فعلی: {totalPercentage}٪)</span>
             </div>
           )}
-
-          {/* پیش‌نمایش تسهیم دنگ با الگوریتم debt-engine */}
-          <div className="space-y-1.5 pt-1">
-            {splits.map((s) => (
-              <div
-                key={s.userId}
-                className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between text-xs"
-              >
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-full bg-purple-500/20 text-purple-300 text-[10px] flex items-center justify-center font-bold">
-                    {s.userId[0]}
-                  </div>
-                  <span className="font-medium text-slate-200">{s.userId}</span>
-                  {s.userId === 'من' && (
-                    <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                      پرداخت‌کننده
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {splitType === 'percentage' && (
-                    <div className="relative w-14">
-                      <input
-                        type="text"
-                        value={percentages[s.userId] ?? 0}
-                        onChange={(e) => handlePercentageChange(s.userId, e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-1.5 py-0.5 text-center font-mono text-xs text-white focus:outline-none focus:border-purple-500 pr-4"
-                      />
-                      <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[10px] text-slate-500 font-bold">
-                        ٪
-                      </span>
-                    </div>
-                  )}
-
-                  <div className="font-mono text-slate-300 font-bold">
-                    {formatToman(s.owedAmount)} تومان
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
 
         {/* دکمه‌های تایید */}
-        <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+        <div className="flex items-center gap-2 pt-2">
           <button
-            type="button"
-            onClick={onClose}
-            className="btn btn-secondary text-xs py-2 px-4"
+            onClick={handleConfirm}
+            disabled={isSubmitting || (splitType === 'percentage' && !isPercentageValid)}
+            className="flex-1 btn btn-primary text-xs py-2.5 rounded-xl font-bold disabled:opacity-50"
           >
-            انصراف
+            {isSubmitting ? 'در حال ثبت...' : 'تایید و ثبت در گروه دنگ'}
           </button>
           <button
-            type="button"
-            disabled={isSubmitting || (splitType === 'percentage' && !isPercentageValid)}
-            onClick={handleConfirm}
-            className="btn btn-split text-xs py-2 px-5 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={onClose}
+            className="btn btn-secondary text-xs py-2.5 rounded-xl px-4"
           >
-            <Check className="w-4 h-4" />
-            <span>{isSubmitting ? 'در حال ثبت...' : 'تایید و ثبت در گروه دنگ'}</span>
+            انصراف
           </button>
         </div>
       </div>

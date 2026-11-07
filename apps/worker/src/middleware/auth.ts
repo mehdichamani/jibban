@@ -2,46 +2,37 @@ import { Context, Next } from 'hono';
 import { Bindings, Variables } from '../types.js';
 
 /**
- * اعتبارسنجی توکن اتصال اختصاصی (Sync Token) اپلیکیشن اندروید و وب‌اپلیکیشن
+ * میان‌افزار مدیریت کاربر برای محیط پارمیس تک‌کاربره
  */
 export async function authMiddleware(
   c: Context<{ Bindings: Bindings; Variables: Variables }>,
   next: Next
 ) {
-  const syncToken =
-    c.req.header('X-Sync-Token') ||
-    c.req.header('Authorization')?.replace('Bearer ', '') ||
-    c.req.query('syncToken');
+  // در فایل پارمیس جدول Users حاوی Usr_id, Usr_name است
+  try {
+    const userRow = await c.env.DB.prepare(
+      'SELECT Usr_id as id, Usr_name as name FROM Users LIMIT 1'
+    ).first<{ id: number; name: string }>();
 
-  // اگر توکنی ارسال شده بود، کاربر متناظر را از دیتابیس D1 می‌خوانیم
-  if (syncToken) {
-    const user = await c.env.DB.prepare(
-      'SELECT id, name, sync_token as syncToken FROM users WHERE sync_token = ?'
-    )
-      .bind(syncToken)
-      .first<{ id: string; name: string; syncToken: string }>();
-
-    if (user) {
-      c.set('userId', user.id);
-      c.set('user', user);
+    if (userRow) {
+      c.set('userId', String(userRow.id));
+      c.set('user', {
+        id: String(userRow.id),
+        name: userRow.name || 'کاربر اصلی',
+        syncToken: 'jibban_sync_demo_token_12345',
+      });
       await next();
       return;
     }
+  } catch (e) {
+    // در صورت بروز خطا به حالت پیش‌فرض برمی‌گردد
   }
 
-  // در صورت عدم ارسال یا برای راحتی محیط توسعه/تست، اولین کاربر موجود را به عنوان کاربر جاری در نظر می‌گیریم
-  const defaultUser = await c.env.DB.prepare(
-    'SELECT id, name, sync_token as syncToken FROM users LIMIT 1'
-  ).first<{ id: string; name: string; syncToken: string }>();
-
-  if (defaultUser) {
-    c.set('userId', defaultUser.id);
-    c.set('user', defaultUser);
-    await next();
-    return;
-  }
-
-  // اگر هنوز هیچ کاربری ایجاد نشده باشد
-  c.set('userId', 'user_default');
+  c.set('userId', '1');
+  c.set('user', {
+    id: '1',
+    name: 'مهدی چمنی',
+    syncToken: 'jibban_sync_demo_token_12345',
+  });
   await next();
 }

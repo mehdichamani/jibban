@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { Account } from '../types.js';
-import { X, Landmark, Wallet, PiggyBank, CreditCard, Building2, UserCheck, Check } from 'lucide-react';
+import { X, Landmark, Wallet, PiggyBank, CreditCard, Building2, UserCheck, Check, FolderTree, ShoppingBag, TrendingUp } from 'lucide-react';
 
 interface AddAccountModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (account: Partial<Account>) => Promise<void>;
   initialData?: Account | null;
+  accounts?: Account[];
+  defaultParentId?: string | null;
 }
 
 const ACCOUNT_COLORS = [
@@ -25,11 +27,16 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
   onClose,
   onSave,
   initialData,
+  accounts = [],
+  defaultParentId,
 }) => {
   if (!isOpen) return null;
 
   const [name, setName] = useState<string>(initialData?.name || '');
   const [type, setType] = useState<Account['type']>(initialData?.type || 'bank');
+  const [parentId, setParentId] = useState<string>(
+    initialData?.parentId || defaultParentId || ''
+  );
   const [bankName, setBankName] = useState<string>(initialData?.bankName || '');
   const [accountNumber, setAccountNumber] = useState<string>(initialData?.accountNumber || '');
   const [cardNumber, setCardNumber] = useState<string>(initialData?.cardNumber || '');
@@ -62,11 +69,23 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
       await onSave({
         name: name.trim(),
         type,
+        parentId: parentId || undefined,
         bankName: bankName.trim() || undefined,
         accountNumber: accountNumber.trim() || undefined,
         cardNumber: cardNumber.trim() || undefined,
         color,
-        icon: type === 'wallet' ? 'wallet' : type === 'savings' ? 'piggy-bank' : 'credit-card',
+        icon:
+          type === 'wallet'
+            ? 'wallet'
+            : type === 'savings'
+            ? 'piggy-bank'
+            : type === 'expense'
+            ? 'shopping-bag'
+            : type === 'income'
+            ? 'trending-up'
+            : type === 'counterparty' || type === 'debt'
+            ? 'user-check'
+            : 'credit-card',
         initialBalance: numBalanceRials,
         balance: initialData ? initialData.balance : numBalanceRials,
         isSource,
@@ -77,6 +96,11 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
       setIsSubmitting(false);
     }
   };
+
+  // گزینه‌های حساب سرگروه / والد (به استثنای خود حساب در زمان ویرایش)
+  const potentialParents = accounts.filter(
+    (a) => !initialData || a.id !== initialData.id
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
@@ -90,7 +114,7 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
               <h3 className="text-base font-bold text-white">
                 {initialData ? 'ویرایش حساب مالی' : 'تعریف حساب مالی جدید'}
               </h3>
-              <p className="text-xs text-slate-400">حساب‌های مبدا (پرداخت)، مقصد (دریافت) یا طرف‌حساب</p>
+              <p className="text-xs text-slate-400">حساب‌های مبدا (پرداخت)، مقصد (دریافت) یا سرفصل‌های معین/تفصیلی</p>
             </div>
           </div>
           <button
@@ -104,13 +128,16 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* نوع حساب */}
           <div>
-            <label className="text-xs font-semibold text-slate-300 block mb-1.5">نوع حساب:</label>
+            <label className="text-xs font-semibold text-slate-300 block mb-1.5">نوع سرفصل حساب:</label>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {[
                 { id: 'bank', label: 'حساب بانکی', icon: Landmark },
                 { id: 'wallet', label: 'کیف پول نقد', icon: Wallet },
+                { id: 'expense', label: 'سرفصل هزینه', icon: ShoppingBag },
+                { id: 'income', label: 'سرفصل درآمد', icon: TrendingUp },
                 { id: 'savings', label: 'پس‌انداز', icon: PiggyBank },
-                { id: 'counterparty', label: 'طرف‌حساب', icon: UserCheck },
+                { id: 'counterparty', label: 'طرف‌حساب/شخص', icon: UserCheck },
+                { id: 'credit', label: 'کارت اعتباری', icon: CreditCard },
               ].map((item) => {
                 const Icon = item.icon;
                 const isSelected = type === item.id;
@@ -119,13 +146,13 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
                     key={item.id}
                     type="button"
                     onClick={() => setType(item.id as Account['type'])}
-                    className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-xs font-medium transition ${
+                    className={`flex items-center gap-2 p-2 rounded-xl text-xs font-medium border transition-all text-right ${
                       isSelected
-                        ? 'border-sky-500 bg-sky-500/15 text-sky-400'
-                        : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:bg-slate-800/50'
+                        ? 'bg-sky-500/15 text-sky-400 border-sky-500/50 shadow-sm'
+                        : 'bg-slate-950/50 text-slate-400 border-slate-800 hover:bg-slate-800/50'
                     }`}
                   >
-                    <Icon className="w-4 h-4 mb-1" />
+                    <Icon className="w-4 h-4 shrink-0" />
                     <span>{item.label}</span>
                   </button>
                 );
@@ -133,29 +160,50 @@ export const AddAccountModal: React.FC<AddAccountModalProps> = ({
             </div>
           </div>
 
+          {/* حساب والد / سرگروه درختی */}
+          <div>
+            <label className="text-xs font-semibold text-slate-300 block mb-1">
+              حساب والد / سرگروه (اختیاری جهت ساختار درختی پارمیس):
+            </label>
+            <div className="relative">
+              <select
+                value={parentId}
+                onChange={(e) => setParentId(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 focus:outline-none focus:border-sky-500"
+              >
+                <option value="">(بدون والد - سرگروه اصلی ریشه)</option>
+                {potentialParents.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.type})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           {/* نام حساب */}
           <div>
-            <label className="text-xs font-semibold text-slate-300 block mb-1">نام حساب:</label>
+            <label className="text-xs font-semibold text-slate-300 block mb-1">عنوان حساب:</label>
             <input
               type="text"
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="مثلاً: کارت بلو بانک، بانک ملی جاری، کیف پول نقد، صاحبخانه..."
+              placeholder="مثلاً: بلوبانک، نان، میوه و سبزیجات، حقوق"
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500"
             />
           </div>
 
-          {/* فیلدهای اختصاصی بانک */}
+          {/* اطلاعات تکمیلی در صورت بانکی بودن */}
           {type === 'bank' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-slate-950/50 border border-slate-800/80 rounded-2xl">
               <div>
                 <label className="text-xs font-semibold text-slate-300 block mb-1">نام بانک:</label>
                 <input
                   type="text"
                   value={bankName}
                   onChange={(e) => setBankName(e.target.value)}
-                  placeholder="مثلاً: ملی، بلو، سامان، ملت..."
+                  placeholder="مثلاً: سامان، پاسارگاد، بلو"
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500"
                 />
               </div>

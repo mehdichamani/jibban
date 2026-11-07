@@ -154,9 +154,10 @@ for aid, title, pid, recivable in all_accs:
         icon = 'layers'
 
     acc_id = f'acc_{aid}'
+    parent_ref = f"'acc_{pid}'" if pid and pid != 0 else 'NULL'
     statements.append(
-        f"INSERT INTO accounts (id, user_id, name, type, bank_name, account_number, card_number, sheba, balance, initial_balance, color, icon, is_archived) "
-        f"VALUES ('{acc_id}', '{user_id}', {sql_str(title)}, '{acc_type}', {sql_str(b_name)}, {sql_str(acc_no)}, {sql_str(card_no)}, {sql_str(sheba)}, {init_bal}, {init_bal}, '{color}', '{icon}', 0);"
+        f"INSERT INTO accounts (id, user_id, parent_id, name, type, bank_name, account_number, card_number, sheba, balance, initial_balance, color, icon, is_archived) "
+        f"VALUES ('{acc_id}', '{user_id}', {parent_ref}, {sql_str(title)}, '{acc_type}', {sql_str(b_name)}, {sql_str(acc_no)}, {sql_str(card_no)}, {sql_str(sheba)}, {init_bal}, {init_bal}, '{color}', '{icon}', 0);"
     )
 
 # پیامک‌ها
