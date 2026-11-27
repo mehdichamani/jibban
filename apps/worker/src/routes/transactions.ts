@@ -134,12 +134,13 @@ transactionsRouter.get('/', async (c) => {
       }
       itemsByMultiId.get(mId)!.push({
         id: String(row.id),
+        entryType: 'destination',
         amount: Math.round(Number(row.amount || 0)),
         description: row.description || undefined,
         accountId: row.toAccountId ? String(row.toAccountId) : null,
         accountName: row.toAccountName || undefined,
         categoryName: row.toAccountName || undefined,
-      });
+      } as any);
     });
   }
 
@@ -373,12 +374,22 @@ transactionsRouter.patch('/:id', async (c) => {
     shamsiDate?: string;
     transactionDate?: string;
     time?: string;
+    items?: Array<{
+      accountId?: string | number | null;
+      amount: number;
+      description?: string | null;
+    }>;
   }>();
 
   const newAmount = body.amount !== undefined ? Number(body.amount) : Number(existing.Act_amount || 0);
   const newDesc = body.description !== undefined ? body.description : existing.Act_info || '';
-  const newDate = (body.shamsiDate || body.transactionDate || existing.Act_date || '').replace(/-/g, '/');
-  const newTime = body.time || existing.Act_time || '12:00';
+  const rawDate = body.shamsiDate || body.transactionDate || existing.Act_date || '';
+  const newDate = /^\d{4}[/-]\d{1,2}[/-]\d{1,2}$/.test(rawDate)
+    ? rawDate.replace(/-/g, '/')
+    : rawDate.includes('T')
+    ? getCurrentShamsiDateTime(rawDate).shamsiDate
+    : existing.Act_date || getCurrentShamsiDateTime().shamsiDate;
+  const newTime = body.time || (rawDate.includes('T') ? getCurrentShamsiDateTime(rawDate).time : existing.Act_time) || '12:00';
 
   const oldFromId = pickLeafAccountId(existing.Act_accRecive_id, existing.Act_rec_Subacc_id, existing.Act_rec_Root_id);
   const oldToId = pickLeafAccountId(existing.Act_accPay_id, existing.Act_pay_Subacc_id, existing.Act_pay_Root_id);
@@ -386,7 +397,62 @@ transactionsRouter.patch('/:id', async (c) => {
   const newFromId = body.fromAccountId !== undefined ? (body.fromAccountId ? Number(body.fromAccountId) : null) : oldFromId;
   const newToId = body.toAccountId !== undefined ? (body.toAccountId ? Number(body.toAccountId) : null) : oldToId;
 
-  const recPath = await resolveAccountPath(c.env.DB, newFromId, existing.Act_rec_Root_id ?? -1);
+  const recPath = await resolveAccountPath(c.env.DB, newFromId, existing.Act_rec_Root_id ?? 4);
+
+  if (existing.Act_multiId > 0 && existing.Act_multiType === 1 && Array.isArray(body.items) && body.items.length > 0) {
+    const sumAmount = body.items.reduce((s, it) => s + Number(it.amount || 0), 0);
+    const finalAmount = sumAmount > 0 ? sumAmount : newAmount;
+
+    await c.env.DB.prepare('UPDATE MultiActivity SET Date = ?, Time = ?, Info = ? WHERE MultiId = ?')
+      .bind(newDate, newTime, newDesc, existing.Act_multiId)
+      .run();
+
+    await c.env.DB.prepare(
+      `UPDATE Activity
+       SET Act_amount = ?, Act_info = ?, Act_date = ?, Act_time = ?,
+           Act_rec_Root_id = ?, Act_rec_Subacc_id = ?, Act_accRecive_id = ?, RecivePath = ?
+       WHERE Act_id = ?`
+    )
+      .bind(finalAmount, newDesc, newDate, newTime, recPath.rootId, recPath.subaccId, recPath.leafId, recPath.path, id)
+      .run();
+
+    await c.env.DB.prepare('DELETE FROM Activity WHERE Act_multiId = ? AND Act_multiType = 2')
+      .bind(existing.Act_multiId)
+      .run();
+
+    const maxActRow = await c.env.DB.prepare('SELECT MAX(Act_id) as maxId FROM Activity').first<{ maxId: number }>();
+    let nextActId = (maxActRow?.maxId || 0) + 1;
+
+    for (const item of body.items) {
+      const itemAccId = item.accountId ? Number(item.accountId) : null;
+      const itemPath = await resolveAccountPath(c.env.DB, itemAccId, 1);
+      await c.env.DB.prepare(
+        `INSERT INTO Activity (
+          Act_id, Act_amount, Act_date, Act_time, Act_info,
+          Act_rec_Root_id, Act_rec_Subacc_id, Act_accRecive_id, RecivePath,
+          Act_pay_Root_id, Act_pay_Subacc_id, Act_accPay_id, PayPath,
+          Act_multiId, Act_multiType, Act_Fiscal_id, Act_iscash, Act_set
+        ) VALUES (?, ?, ?, ?, ?, -1, -1, -1, '', ?, ?, ?, ?, ?, 2, ?, 1, 1)`
+      )
+        .bind(
+          nextActId++,
+          Number(item.amount || 0),
+          newDate,
+          newTime,
+          item.description || newDesc,
+          itemPath.rootId,
+          itemPath.subaccId,
+          itemPath.leafId,
+          itemPath.path,
+          existing.Act_multiId,
+          existing.Act_Fiscal_id || 1
+        )
+        .run();
+    }
+
+    return c.json({ success: true, message: 'سند چند حسابی با موفقیت ویرایش شد' });
+  }
+
   const payPath = await resolveAccountPath(c.env.DB, newToId, existing.Act_pay_Root_id ?? -1);
 
   await c.env.DB.prepare(

@@ -389,11 +389,16 @@ export const api = {
     tag?: string | null;
     transactionDate?: string;
     shamsiDate?: string | null;
+    items?: Array<{
+      accountId?: string | null;
+      amount: number;
+      description?: string | null;
+    }>;
   }): Promise<boolean> {
     try {
       const token = getSyncToken();
       const res = await fetch(`${API_BASE}/transactions/${id}`, {
-        method: 'PUT',
+        method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
           'X-Sync-Token': token,

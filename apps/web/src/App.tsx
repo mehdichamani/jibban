@@ -150,6 +150,11 @@ export const App: React.FC = () => {
       description?: string;
       transactionDate?: string;
       shamsiDate?: string;
+      items?: Array<{
+        accountId?: string | null;
+        amount: number;
+        description?: string | null;
+      }>;
     }
   ) => {
     const success = await api.updateTransaction(id, data);

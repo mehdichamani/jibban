@@ -9,18 +9,35 @@ import {
 } from '../lib/date.js';
 
 interface JalaliDatePickerProps {
-  value: string; // ISO string
+  value: string; // ISO string یا تاریخ شمسی (1405/08/27 یا 1405-08-27)
+  time?: string;  // ساعت اختیاری (مثلاً 18:49)
   onChange: (isoString: string) => void;
   label?: string;
 }
 
+function parseInitialJalali(value: string, time?: string) {
+  const shamsiMatch = String(value || '').trim().match(/^(1[34]\d{2})[/-](\d{1,2})[/-](\d{1,2})$/);
+  if (shamsiMatch) {
+    const [hh, mm] = (time || '12:00').split(':').map((n) => parseInt(n, 10));
+    return {
+      year: parseInt(shamsiMatch[1], 10),
+      month: parseInt(shamsiMatch[2], 10),
+      day: parseInt(shamsiMatch[3], 10),
+      hour: !isNaN(hh) ? hh : 12,
+      minute: !isNaN(mm) ? mm : 0,
+    };
+  }
+  const d = value ? new Date(value) : new Date();
+  return dateToJalaliParts(isNaN(d.getTime()) ? new Date() : d);
+}
+
 export const JalaliDatePicker: React.FC<JalaliDatePickerProps> = ({
   value,
+  time,
   onChange,
   label = 'تاریخ و زمان تراکنش (شمسی):',
 }) => {
-  const initialDate = value ? new Date(value) : new Date();
-  const initialParts = dateToJalaliParts(isNaN(initialDate.getTime()) ? new Date() : initialDate);
+  const initialParts = parseInitialJalali(value, time);
 
   const [year, setYear] = useState<number>(initialParts.year);
   const [month, setMonth] = useState<number>(initialParts.month);
