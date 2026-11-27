@@ -51,10 +51,24 @@ export const SmsInboxModal: React.FC<SmsInboxModalProps> = ({
   const [customAmount, setCustomAmount] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [mobileView, setMobileView] = useState<'list' | 'form'>('list');
+
+  const formatAccountTypeFa = (type?: string) => {
+    switch (type) {
+      case 'bank': return 'بانک';
+      case 'wallet': return 'صندوق/کیف';
+      case 'savings': return 'پس‌انداز';
+      case 'expense': return 'هزینه';
+      case 'income': return 'درآمد';
+      case 'debt': return 'بدهی/شخص';
+      default: return 'حساب';
+    }
+  };
 
   // هنگام تغییر پیامک انتخابی، فیلدها را پیش‌پر کن
   const handleSelectSms = (sms: PendingSms) => {
     setSelectedSms(sms);
+    setMobileView('form');
     const parsed = parseBankSms(sms.rawText, sms.sender);
     const amountToman = Math.round((sms.parsedAmount || parsed.amount || 0) / 10);
     setCustomAmount(amountToman > 0 ? String(amountToman) : '');
@@ -130,8 +144,8 @@ export const SmsInboxModal: React.FC<SmsInboxModalProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-white">صندوق ورودی پیامک‌ها (SMS Inbox)</h3>
-                <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                <h3 className="text-sm sm:text-base font-bold text-white">صندوق پیامک‌ها</h3>
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 whitespace-nowrap shrink-0">
                   {pendingList.length} در انتظار
                 </span>
               </div>
@@ -159,9 +173,9 @@ export const SmsInboxModal: React.FC<SmsInboxModalProps> = ({
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mt-4 overflow-y-auto flex-1 pr-1">
-            {/* ستون راست: لیست پیامک‌های انتظار */}
-            <div className="md:col-span-5 space-y-2 max-h-48 sm:max-h-[60vh] overflow-y-auto">
+          <div className="flex flex-col md:grid md:grid-cols-12 gap-4 mt-4 flex-1 min-h-0 overflow-hidden">
+            {/* ستون راست: لیست پیامک‌های انتظار (در موبایل تمام ارتفاع مودال را می‌گیرد) */}
+            <div className={`${mobileView === 'list' ? 'flex' : 'hidden'} md:flex md:col-span-5 flex-col space-y-2 flex-1 min-h-0 overflow-y-auto pr-1`}>
               {pendingList.map((sms) => {
                 const isSelected = selectedSms?.id === sms.id;
                 return (
@@ -197,14 +211,24 @@ export const SmsInboxModal: React.FC<SmsInboxModalProps> = ({
             </div>
 
             {/* ستون چپ: جزئیات و فرم تبدیل به سند */}
-            <div className="md:col-span-7 bg-slate-950/70 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
+            <div className={`${mobileView === 'form' ? 'flex' : 'hidden'} md:flex md:col-span-7 bg-slate-950/70 border border-slate-800 rounded-2xl p-4 flex-col justify-between flex-1 min-h-0 overflow-y-auto`}>
               {selectedSms ? (
                 <form onSubmit={handleConvert} className="space-y-3.5">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                    <span className="text-xs font-bold text-sky-400 flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5" />
-                      فرم تبدیل به سند حسابداری
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setMobileView('list')}
+                        className="md:hidden inline-flex items-center gap-1 text-xs font-semibold text-slate-300 hover:text-white bg-slate-900 px-2 py-1 rounded-lg border border-slate-700"
+                      >
+                        <ArrowRight className="w-3.5 h-3.5" />
+                        <span>لیست</span>
+                      </button>
+                      <span className="text-xs font-bold text-sky-400 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5" />
+                        فرم تبدیل به سند حسابداری
+                      </span>
+                    </div>
                     <button
                       type="button"
                       onClick={() => handleIgnore(selectedSms.id)}
@@ -244,7 +268,7 @@ export const SmsInboxModal: React.FC<SmsInboxModalProps> = ({
                       <option value="">(بدون حساب مبدا)</option>
                       {accounts.map((a) => (
                         <option key={a.id} value={a.id}>
-                          {a.name} ({a.type})
+                          {a.name} ({formatAccountTypeFa(a.type)})
                         </option>
                       ))}
                     </select>
@@ -261,7 +285,7 @@ export const SmsInboxModal: React.FC<SmsInboxModalProps> = ({
                       <option value="">(بدون حساب مقصد)</option>
                       {accounts.map((a) => (
                         <option key={a.id} value={a.id}>
-                          {a.name} ({a.type})
+                          {a.name} ({formatAccountTypeFa(a.type)})
                         </option>
                       ))}
                     </select>
