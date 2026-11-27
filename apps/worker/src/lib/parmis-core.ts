@@ -311,3 +311,68 @@ export async function reverseActivityRowBalances(
     await applyAccountDelta(db, toAccId, -amount);
   }
 }
+
+/**
+ * محاسبه دقیق مانده لحظه‌ای حساب‌ها در یک سال مالی مطابق فرمول بومی پارمیس:
+ * مانده لحظه‌ای = مانده اول دوره (Ac_balance یا RemainedAccount) + جمع واریزی‌ها (Pay) - جمع برداشتی‌ها (Rec)
+ */
+export async function computeFiscalBalancesMap(
+  db: D1Database,
+  fiscalYearId: number,
+  activeFiscalYearId: number
+): Promise<Map<number, { opening: number; payIn: number; recOut: number; balance: number }>> {
+  const isActiveYear = fiscalYearId === activeFiscalYearId;
+
+  const { results: accRows } = await db
+    .prepare(
+      isActiveYear
+        ? 'SELECT Ac_id as id, COALESCE(Ac_balance, 0) as opening FROM accounts'
+        : `SELECT a.Ac_id as id, COALESCE(r.remained, 0) as opening
+           FROM accounts a
+           LEFT JOIN RemainedAccount r ON r.AccountId = a.Ac_id AND r.FiscalId = ?`
+    )
+    .bind(...(isActiveYear ? [] : [fiscalYearId]))
+    .all<{ id: number; opening: number }>();
+
+  const { results: actRows } = await db
+    .prepare(
+      `SELECT Act_amount, Act_rec_Root_id, Act_rec_Subacc_id, Act_accRecive_id,
+              Act_pay_Root_id, Act_pay_Subacc_id, Act_accPay_id
+       FROM Activity
+       WHERE Act_Fiscal_id = ?`
+    )
+    .bind(fiscalYearId)
+    .all<any>();
+
+  const map = new Map<number, { opening: number; payIn: number; recOut: number; balance: number }>();
+  for (const row of accRows || []) {
+    const opening = Math.round(Number(row.opening || 0));
+    map.set(Number(row.id), { opening, payIn: 0, recOut: 0, balance: opening });
+  }
+
+  const addFlow = (accId: number | null | undefined, field: 'payIn' | 'recOut', amt: number) => {
+    if (!accId || accId <= 0 || !amt) return;
+    const entry = map.get(accId);
+    if (entry) entry[field] += amt;
+  };
+
+  for (const act of actRows || []) {
+    const amt = Number(act.Act_amount || 0);
+    if (!amt) continue;
+
+    // هر ردیف Activity در هر سطح (کل، معین، تفصیلی) فقط یک‌بار روی آن شناسه اثر دارد
+    const payIds = new Set<number>([act.Act_pay_Root_id, act.Act_pay_Subacc_id, act.Act_accPay_id]);
+    for (const id of payIds) addFlow(id, 'payIn', amt);
+
+    const recIds = new Set<number>([act.Act_rec_Root_id, act.Act_rec_Subacc_id, act.Act_accRecive_id]);
+    for (const id of recIds) addFlow(id, 'recOut', amt);
+  }
+
+  for (const entry of map.values()) {
+    entry.payIn = Math.round(entry.payIn);
+    entry.recOut = Math.round(entry.recOut);
+    entry.balance = Math.round(entry.opening + entry.payIn - entry.recOut);
+  }
+
+  return map;
+}

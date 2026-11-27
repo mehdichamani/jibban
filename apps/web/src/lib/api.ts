@@ -106,11 +106,15 @@ export const api = {
   /**
    * دریافت لیست تمام حساب‌های مالی کاربر مستقیماً از دیتابیس
    */
-  async getAccounts(filter?: { type?: string }): Promise<Account[]> {
+  async getAccounts(filter?: { type?: string; fiscalYearId?: string }): Promise<Account[]> {
     try {
       const token = getSyncToken();
       let url = `${API_BASE}/accounts`;
-      if (filter?.type) url += `?type=${filter.type}`;
+      const params = new URLSearchParams();
+      if (filter?.type) params.append('type', filter.type);
+      if (filter?.fiscalYearId) params.append('fiscalYearId', filter.fiscalYearId);
+      const qs = params.toString();
+      if (qs) url += `?${qs}`;
 
       const res = await fetch(url, { headers: { 'X-Sync-Token': token } });
       if (res.ok) {

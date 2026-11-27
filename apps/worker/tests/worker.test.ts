@@ -115,6 +115,16 @@ function createParmisMockD1(): D1Database {
           })) as unknown as T[],
         };
       }
+      if (q.includes('SELECT Ac_id as id, COALESCE(Ac_balance, 0) as opening FROM accounts')) {
+        return {
+          results: store.accounts.map((a) => ({ id: a.Ac_id, opening: a.Ac_balance })) as unknown as T[],
+        };
+      }
+      if (q.includes('SELECT Act_amount, Act_rec_Root_id')) {
+        return {
+          results: store.Activity.filter((a) => a.Act_Fiscal_id === boundParams[0]) as unknown as T[],
+        };
+      }
       if (q.includes('WITH RECURSIVE hier')) {
         const getRoot = (id: number): number => {
           let cur = store.accounts.find((a) => a.Ac_id === id);
@@ -124,7 +134,14 @@ function createParmisMockD1(): D1Database {
           return cur ? cur.Ac_id : id;
         };
         return {
-          results: store.accounts.map((a) => ({ ...a, rootId: getRoot(a.Ac_id) })) as unknown as T[],
+          results: store.accounts.map((a) => ({
+            id: a.Ac_id,
+            name: a.Ac_title,
+            parentId: a.Ac_parent_id,
+            balance: a.Ac_balance,
+            enable: a.Ac_enable,
+            rootId: getRoot(a.Ac_id),
+          })) as unknown as T[],
         };
       }
       if (q.includes('FROM Activity act') && q.includes('Act_multiType != 2')) {
@@ -183,13 +200,13 @@ function createParmisMockD1(): D1Database {
           Act_id, Act_amount, Act_date, Act_time, Act_info,
           Act_rec_Root_id, Act_rec_Subacc_id, Act_accRecive_id, RecivePath,
           Act_pay_Root_id, Act_pay_Subacc_id, Act_accPay_id, PayPath,
-          Act_multiId, Act_multiType, Act_Fiscal_id,
+          Act_Fiscal_id,
         ] = boundParams;
         store.Activity.push({
           Act_id, Act_amount, Act_date, Act_time, Act_info,
           Act_rec_Root_id, Act_rec_Subacc_id, Act_accRecive_id, RecivePath,
           Act_pay_Root_id, Act_pay_Subacc_id, Act_accPay_id, PayPath,
-          Act_multiId, Act_multiType, Act_Fiscal_id,
+          Act_multiId: 0, Act_multiType: 0, Act_Fiscal_id,
         });
       } else if (q.startsWith('UPDATE Activity')) {
         const [amount, info, date, time, recR, recS, recL, recP, payR, payS, payL, payP, id] = boundParams;
@@ -203,12 +220,9 @@ function createParmisMockD1(): D1Database {
         }
       } else if (q.startsWith('DELETE FROM Activity WHERE Act_id = ?')) {
         store.Activity = store.Activity.filter((a) => a.Act_id !== boundParams[0]);
-      } else if (q.startsWith('UPDATE accounts SET Ac_balance = COALESCE(Ac_balance, 0) + ?')) {
+      } else if (q.startsWith('UPDATE accounts SET Ac_balance = ? WHERE Ac_id = ?')) {
         const acc = store.accounts.find((a) => a.Ac_id === boundParams[1]);
-        if (acc) acc.Ac_balance += boundParams[0];
-      } else if (q.startsWith('UPDATE accounts SET Ac_balance = 0 WHERE Ac_id = ?')) {
-        const acc = store.accounts.find((a) => a.Ac_id === boundParams[0]);
-        if (acc) acc.Ac_balance = 0;
+        if (acc) acc.Ac_balance = boundParams[0];
       } else if (q.startsWith('INSERT INTO RemainedAccount')) {
         store.RemainedAccount.push({
           id: boundParams[0], AccountId: boundParams[1], FiscalId: boundParams[2], remained: boundParams[3],
@@ -332,12 +346,27 @@ describe('Parmis Core Worker API', () => {
     expect(listJson.data.some((t: any) => t.type === 'credit' && t.amount === 2000000)).toBe(true);
     expect(listJson.data.some((t: any) => t.type === 'debit' && t.amount === 500000)).toBe(true);
 
-    // حذف سند هزینه و اطمینان از برگشت مانده
+    // بررسی مانده لحظه‌ای بلوبانک: 10,000,000 - 500,000 + 2,000,000 = 11,500,000
+    const accMid = await app.request('/api/accounts', {
+      headers: { 'X-Sync-Token': 'jibban_sync_demo_token_12345' },
+    }, mockEnv);
+    const accMidJson = (await accMid.json()) as any;
+    const bluMid = accMidJson.data.find((a: any) => a.id === '173');
+    expect(bluMid.balance).toBe(11500000);
+
+    // حذف سند هزینه و اطمینان از برگشت مانده به 12,000,000
     const delRes = await app.request(`/api/transactions/${created.data.id}`, {
       method: 'DELETE',
       headers: { 'X-Sync-Token': 'jibban_sync_demo_token_12345' },
     }, mockEnv);
     expect(delRes.status).toBe(200);
+
+    const accAfter = await app.request('/api/accounts', {
+      headers: { 'X-Sync-Token': 'jibban_sync_demo_token_12345' },
+    }, mockEnv);
+    const accAfterJson = (await accAfter.json()) as any;
+    const bluAfter = accAfterJson.data.find((a: any) => a.id === '173');
+    expect(bluAfter.balance).toBe(12000000);
   });
 
   it('تطبیق خودکار پیامک بانکی با BankAccounts و رد پیامک غیربانکی', async () => {

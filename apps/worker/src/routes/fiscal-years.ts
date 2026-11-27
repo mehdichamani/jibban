@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { Bindings, Variables } from '../types.js';
-import { getActiveFiscalYear, getCurrentShamsiDateTime } from '../lib/parmis-core.js';
+import { computeFiscalBalancesMap, getActiveFiscalYear, getCurrentShamsiDateTime } from '../lib/parmis-core.js';
 
 export const fiscalYearsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
@@ -129,7 +129,10 @@ fiscalYearsRouter.post('/:id/close', async (c) => {
     .first<any>();
   if (!closingYear) return c.json({ success: false, error: 'سال مالی یافت نشد' }, 404);
 
-  // ۱. ثبت مانده پایان دوره تمام حساب‌ها در RemainedAccount
+  // ۱. محاسبه مانده پایان دوره حساب‌ها (مانده اول دوره + گردش دوره) و ثبت مانده اول دوره در RemainedAccount
+  const activeFy = await getActiveFiscalYear(c.env.DB);
+  const balancesMap = await computeFiscalBalancesMap(c.env.DB, id, activeFy.id);
+
   const { results: allAccounts } = await c.env.DB.prepare(
     `WITH RECURSIVE hier(id, parent, root) AS (
        SELECT Ac_id, Ac_parent_id, Ac_id FROM accounts WHERE Ac_parent_id = 0
@@ -153,9 +156,10 @@ fiscalYearsRouter.post('/:id/close', async (c) => {
     await c.env.DB.batch(
       slice.map((acc) => {
         const remId = nextRemId++;
+        const opening = balancesMap.get(acc.Ac_id)?.opening ?? acc.Ac_balance;
         return c.env.DB
           .prepare('INSERT INTO RemainedAccount (id, AccountId, FiscalId, remained) VALUES (?, ?, ?, ?)')
-          .bind(remId, acc.Ac_id, id, acc.Ac_balance);
+          .bind(remId, acc.Ac_id, id, opening);
       })
     );
   }
@@ -163,12 +167,15 @@ fiscalYearsRouter.post('/:id/close', async (c) => {
   // ۲. بستن سال مالی فعلی
   await c.env.DB.prepare('UPDATE FiscalYear SET fiscal_status = 2 WHERE fiscal_id = ?').bind(id).run();
 
-  // ۳. صفر کردن حساب‌های موقت (۱: هزینه‌ها، ۲: درآمدها) برای شروع سال جدید
-  const nominalIds = accountsList.filter((a) => a.rootId === 1 || a.rootId === 2).map((a) => a.Ac_id);
-  for (let i = 0; i < nominalIds.length; i += CHUNK) {
-    const slice = nominalIds.slice(i, i + CHUNK);
+  // ۳. انتقال مانده پایان دوره حساب‌های دائمی به Ac_balance سال جدید و صفر کردن حساب‌های موقت (۱: هزینه‌ها، ۲: درآمدها)
+  for (let i = 0; i < accountsList.length; i += CHUNK) {
+    const slice = accountsList.slice(i, i + CHUNK);
     await c.env.DB.batch(
-      slice.map((accId) => c.env.DB.prepare('UPDATE accounts SET Ac_balance = 0 WHERE Ac_id = ?').bind(accId))
+      slice.map((acc) => {
+        const isNominal = acc.rootId === 1 || acc.rootId === 2;
+        const nextOpening = isNominal ? 0 : (balancesMap.get(acc.Ac_id)?.balance ?? acc.Ac_balance);
+        return c.env.DB.prepare('UPDATE accounts SET Ac_balance = ? WHERE Ac_id = ?').bind(nextOpening, acc.Ac_id);
+      })
     );
   }
 

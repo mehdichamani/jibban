@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { Bindings, Variables } from '../types.js';
+import { computeFiscalBalancesMap, getActiveFiscalYear } from '../lib/parmis-core.js';
 
 export const accountsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
@@ -58,7 +59,10 @@ function resolveAccountStyling(type: string, rootId: number) {
  */
 accountsRouter.get('/', async (c) => {
   const typeFilter = c.req.query('type');
-  const asTree = c.req.query('tree') === 'true';
+  const fiscalYearParam = c.req.query('fiscalYearId');
+  const activeFy = await getActiveFiscalYear(c.env.DB);
+  const targetFyId = fiscalYearParam ? Number(fiscalYearParam) : activeFy.id;
+  const balancesMap = await computeFiscalBalancesMap(c.env.DB, targetFyId, activeFy.id);
 
   // کوئری CTE برای استخراج حساب‌ها به همراه root_id ریشه
   const query = `
@@ -93,6 +97,7 @@ accountsRouter.get('/', async (c) => {
     const rootId = Number(row.rootId || row.id);
     const type = resolveAccountType(rootId);
     const styling = resolveAccountStyling(type, rootId);
+    const computed = balancesMap.get(Number(row.id));
 
     return {
       id: String(row.id),
@@ -105,8 +110,8 @@ accountsRouter.get('/', async (c) => {
       accountNumber: row.accountNumber ? String(row.accountNumber).replace(/'/g, '') : undefined,
       cardNumber: row.cardNumber || undefined,
       sheba: row.sheba ? String(row.sheba).replace(/'/g, '') : undefined,
-      balance: Math.round(Number(row.balance || 0)),
-      initialBalance: 0,
+      balance: computed ? computed.balance : Math.round(Number(row.balance || 0)),
+      initialBalance: computed ? computed.opening : Math.round(Number(row.balance || 0)),
       color: styling.color,
       icon: styling.icon,
       isArchived: row.enable === 0,
@@ -150,14 +155,19 @@ accountsRouter.get('/:id', async (c) => {
   }
 
   // گردش حساب در Activity
+  const activeFy = await getActiveFiscalYear(c.env.DB);
+  const fiscalYearParam = c.req.query('fiscalYearId');
+  const targetFyId = fiscalYearParam ? Number(fiscalYearParam) : activeFy.id;
+  const balancesMap = await computeFiscalBalancesMap(c.env.DB, targetFyId, activeFy.id);
+  const computed = balancesMap.get(numId);
+
   const txStats = await c.env.DB.prepare(
-    `SELECT 
-       COUNT(*) as txCount,
-       SUM(CASE WHEN Act_accRecive_id = ? OR Act_rec_Subacc_id = ? THEN Act_amount ELSE 0 END) as totalWithdraw,
-       SUM(CASE WHEN Act_accPay_id = ? OR Act_pay_Subacc_id = ? THEN Act_amount ELSE 0 END) as totalDeposit
+    `SELECT COUNT(*) as txCount
      FROM Activity
-     WHERE Act_accRecive_id = ? OR Act_rec_Subacc_id = ? OR Act_accPay_id = ? OR Act_pay_Subacc_id = ?`
-  ).bind(numId, numId, numId, numId, numId, numId, numId, numId).first<any>();
+     WHERE Act_Fiscal_id = ?
+       AND (Act_accRecive_id = ? OR Act_rec_Subacc_id = ? OR Act_rec_Root_id = ?
+            OR Act_accPay_id = ? OR Act_pay_Subacc_id = ? OR Act_pay_Root_id = ?)`
+  ).bind(targetFyId, numId, numId, numId, numId, numId, numId).first<any>();
 
   return c.json({
     success: true,
@@ -165,14 +175,15 @@ accountsRouter.get('/:id', async (c) => {
       id: String(row.id),
       name: String(row.name || '').trim(),
       parentId: row.parentId === 0 ? null : String(row.parentId),
-      balance: Math.round(Number(row.balance || 0)),
+      balance: computed ? computed.balance : Math.round(Number(row.balance || 0)),
+      openingBalance: computed ? computed.opening : Math.round(Number(row.balance || 0)),
       bankName: row.bankName,
       accountNumber: row.accountNumber ? String(row.accountNumber).replace(/'/g, '') : undefined,
       cardNumber: row.cardNumber,
       sheba: row.sheba ? String(row.sheba).replace(/'/g, '') : undefined,
       txCount: Number(txStats?.txCount || 0),
-      totalWithdraw: Math.round(Number(txStats?.totalWithdraw || 0)),
-      totalDeposit: Math.round(Number(txStats?.totalDeposit || 0)),
+      totalWithdraw: computed ? computed.recOut : 0,
+      totalDeposit: computed ? computed.payIn : 0,
     },
   });
 });

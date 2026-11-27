@@ -5,7 +5,6 @@ import {
   getActiveFiscalYear,
   getCurrentShamsiDateTime,
   resolveAccountPath,
-  applyActivityBalances,
 } from '../lib/parmis-core.js';
 
 export const smsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -319,7 +318,6 @@ smsRouter.post('/:id/confirm', async (c) => {
     .run();
 
   await c.env.DB.prepare('UPDATE smsTable SET TransactionId = ? WHERE ID = ?').bind(nextActId, id).run();
-  await applyActivityBalances(c.env.DB, recPath.accountId, payPath.accountId, cleanAmount);
 
   return c.json({
     success: true,

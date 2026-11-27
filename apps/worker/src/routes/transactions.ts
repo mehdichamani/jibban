@@ -4,8 +4,6 @@ import {
   getActiveFiscalYear,
   getCurrentShamsiDateTime,
   resolveAccountPath,
-  applyActivityBalances,
-  reverseActivityRowBalances,
   pickLeafAccountId,
 } from '../lib/parmis-core.js';
 
@@ -257,8 +255,6 @@ transactionsRouter.post('/', async (c) => {
       )
       .run();
 
-    await applyActivityBalances(c.env.DB, fromPath.accountId, null, body.amount);
-
     for (const item of body.items) {
       nextActId++;
       const itemAccId = item.accountId ? Number(item.accountId) : null;
@@ -286,8 +282,6 @@ transactionsRouter.post('/', async (c) => {
           fiscalId
         )
         .run();
-
-      await applyActivityBalances(c.env.DB, null, itemPath.accountId, item.amount);
     }
 
     return c.json(
@@ -344,8 +338,6 @@ transactionsRouter.post('/', async (c) => {
     )
     .run();
 
-  await applyActivityBalances(c.env.DB, recPath.accountId, payPath.accountId, body.amount);
-
   return c.json(
     {
       success: true,
@@ -382,9 +374,6 @@ transactionsRouter.patch('/:id', async (c) => {
     transactionDate?: string;
     time?: string;
   }>();
-
-  // ۱. برگرداندن اثر مالی سند قبلی
-  await reverseActivityRowBalances(c.env.DB, existing);
 
   const newAmount = body.amount !== undefined ? Number(body.amount) : Number(existing.Act_amount || 0);
   const newDesc = body.description !== undefined ? body.description : existing.Act_info || '';
@@ -423,8 +412,6 @@ transactionsRouter.patch('/:id', async (c) => {
       id
     )
     .run();
-
-  await applyActivityBalances(c.env.DB, recPath.accountId, payPath.accountId, newAmount);
 
   return c.json({ success: true, message: 'سند با موفقیت اصلاح و مانده حساب‌ها بروزرسانی شد' });
 });
@@ -472,16 +459,9 @@ transactionsRouter.delete('/:id', async (c) => {
   if (!act) return c.json({ success: false, error: 'سند پیدا نشد' }, 404);
 
   if (act.Act_multiId > 0) {
-    const { results: multiRows } = await c.env.DB.prepare('SELECT * FROM Activity WHERE Act_multiId = ?')
-      .bind(act.Act_multiId)
-      .all<any>();
-    for (const row of multiRows || []) {
-      await reverseActivityRowBalances(c.env.DB, row);
-    }
     await c.env.DB.prepare('DELETE FROM Activity WHERE Act_multiId = ?').bind(act.Act_multiId).run();
     await c.env.DB.prepare('DELETE FROM MultiActivity WHERE MultiId = ?').bind(act.Act_multiId).run();
   } else {
-    await reverseActivityRowBalances(c.env.DB, act);
     await c.env.DB.prepare('DELETE FROM Activity WHERE Act_id = ?').bind(id).run();
   }
 

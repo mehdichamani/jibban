@@ -62,7 +62,7 @@ export const App: React.FC = () => {
           offset: 0,
           fiscalYearId: effectiveFyId || undefined,
         }),
-        api.getAccounts(),
+        api.getAccounts({ fiscalYearId: effectiveFyId || undefined }),
         api.getPendingSms(),
       ]);
       setTransactions(txList);
