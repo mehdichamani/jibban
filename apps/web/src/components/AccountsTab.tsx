@@ -73,11 +73,14 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
     });
   };
 
-  // محاسبات دارایی‌ها
-  const liquidAccounts = accounts.filter((a) => a.type === 'bank' || a.type === 'wallet');
+  // محاسبات دارایی‌ها (فقط حساب‌های برگ تا با سرشاخه جمع مضاعف نشود)
+  const parentIds = new Set(accounts.map((a) => a.parentId).filter(Boolean));
+  const isLeafAccount = (a: Account) => !parentIds.has(a.id);
+
+  const liquidAccounts = accounts.filter((a) => (a.type === 'bank' || a.type === 'wallet') && isLeafAccount(a));
   const totalLiquidBalance = liquidAccounts.reduce((sum, a) => sum + (a.balance || 0), 0);
 
-  const savingsAccounts = accounts.filter((a) => a.type === 'savings');
+  const savingsAccounts = accounts.filter((a) => a.type === 'savings' && isLeafAccount(a));
   const totalSavingsBalance = savingsAccounts.reduce((sum, a) => sum + (a.balance || 0), 0);
 
   const totalAssets = totalLiquidBalance + totalSavingsBalance;
@@ -125,17 +128,7 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
       }
     });
 
-    // محاسبه بازگشتی تراز زیردرخت
-    const computeSubtree = (node: AccountTreeNode): number => {
-      let sum = node.balance || 0;
-      for (const child of node.children) {
-        sum += computeSubtree(child);
-      }
-      node.subtreeBalance = sum;
-      return sum;
-    };
-
-    roots.forEach(computeSubtree);
+    // مانده سرشاخه‌ها در بک‌اند پارمیس از قبل تجمیع شده است؛ از جمع مضاعف خودداری می‌کنیم
     return roots;
   };
 
@@ -169,17 +162,17 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
     return (
       <div key={node.id} className="relative space-y-1">
         <div
-          className={`flex items-center justify-between p-2.5 rounded-xl transition-all duration-150 group ${
+          className={`flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-2 p-2.5 rounded-xl transition-all duration-150 group ${
             depth === 0
               ? 'bg-slate-900/90 border border-slate-800 hover:border-slate-700 shadow-sm'
               : depth === 1
               ? 'bg-slate-900/40 border border-slate-800/60 hover:bg-slate-900/70'
               : 'bg-slate-950/40 hover:bg-slate-900/50 border border-slate-800/30'
           }`}
-          style={{ marginRight: `${indentPixels}px` }}
+          style={{ marginRight: `${Math.min(indentPixels, 36)}px` }}
         >
           {/* سمت راست: خط اتصال، آیکون باز/بسته، آیکون و نام حساب */}
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
             {depth > 0 && (
               <CornerDownLeft className="w-3.5 h-3.5 text-slate-600 shrink-0 opacity-60" />
             )}
@@ -232,15 +225,15 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
           </div>
 
           {/* سمت چپ: مانده و دکمه‌های اقدام */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-3 pr-7 sm:pr-0">
             <div className="text-left font-mono">
-              <span className="text-xs sm:text-sm font-bold text-white">
-                {formatToman(hasChildren ? node.subtreeBalance : node.balance || 0)}
+              <span className="text-xs sm:text-sm font-bold text-white" dir="ltr">
+                {formatToman(node.balance || 0)}
               </span>
               <span className="text-[10px] text-slate-400 mr-1">تومان</span>
             </div>
 
-            <div className="flex items-center gap-1 opacity-60 group-hover:opacity-100 transition">
+            <div className="flex items-center gap-1 opacity-80 sm:opacity-60 group-hover:opacity-100 transition">
               {/* دکمه افزودن زیرحساب */}
               <button
                 onClick={() => {

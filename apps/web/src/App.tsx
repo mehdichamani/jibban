@@ -344,7 +344,13 @@ export const App: React.FC = () => {
       {/* محتوای اصلی */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 pt-4 sm:pt-6">
         {/* نوار ناوبری اصلی */}
-        <Navigation activeTab={activeTab} onChangeTab={setActiveTab} />
+        <Navigation
+          activeTab={activeTab}
+          onChangeTab={(tab) => {
+            setActiveTab(tab);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+        />
 
         <div className="mt-5">
           {activeTab === 'transactions' && (

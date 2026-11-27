@@ -145,9 +145,10 @@ export const SettingsTab: React.FC = () => {
         <div className="flex items-center gap-2">
           <input
             type="text"
+            dir="ltr"
             readOnly
             value={token}
-            className="input-field font-mono text-xs sm:text-sm bg-slate-950/80 text-sky-300"
+            className="input-field font-mono text-xs sm:text-sm bg-slate-950/80 text-sky-300 text-left"
           />
           <button
             onClick={handleCopy}

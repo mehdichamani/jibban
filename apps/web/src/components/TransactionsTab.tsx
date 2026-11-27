@@ -143,11 +143,12 @@ export const TransactionsTab: React.FC<TransactionsTabProps> = ({
           </div>
           <div className="flex items-baseline gap-1.5">
             <span
+              dir="ltr"
               className={`text-xl sm:text-2xl font-bold font-mono tracking-tight ${
                 netBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'
               }`}
             >
-              {formatToman(Math.abs(netBalance))}
+              {netBalance < 0 ? '-' : ''}{formatToman(Math.abs(netBalance))}
             </span>
             <span className="text-xs text-slate-400">تومان</span>
           </div>
@@ -395,16 +396,16 @@ export const TransactionsTab: React.FC<TransactionsTabProps> = ({
                       <div className="mt-3 p-3 bg-slate-950/70 rounded-xl border border-purple-900/40 space-y-2">
                         <span className="text-[11px] font-bold text-slate-400 block mb-1">ریز ردیف‌های سند دوبل:</span>
                         {tx.items.map((it) => (
-                          <div key={it.id} className="flex items-center justify-between text-xs py-1 border-b border-slate-800/60 last:border-0">
-                            <div className="flex items-center gap-2">
-                              <span className={`px-1.5 py-0.5 rounded text-[10px] ${it.entryType === 'source' ? 'bg-rose-500/15 text-rose-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
+                          <div key={it.id} className="flex items-center justify-between gap-2 text-xs py-1 border-b border-slate-800/60 last:border-0">
+                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] shrink-0 ${it.entryType === 'source' ? 'bg-rose-500/15 text-rose-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
                                 {it.entryType === 'source' ? 'بدهکار (مبدأ)' : 'بستانکار (مقصد)'}
                               </span>
-                              <span className="text-slate-300 font-medium">
+                              <span className="text-slate-300 font-medium truncate">
                                 {it.accountName || it.counterpartyName || it.description || 'ردیف'}
                               </span>
                             </div>
-                            <span className="font-mono font-bold text-slate-200">
+                            <span className="font-mono font-bold text-slate-200 shrink-0" dir="ltr">
                               {formatToman(it.amount)} ت
                             </span>
                           </div>
@@ -417,6 +418,7 @@ export const TransactionsTab: React.FC<TransactionsTabProps> = ({
                 {/* مبلغ و دکمه‌های عملیات */}
                 <div className="text-left flex flex-col items-end shrink-0">
                   <div
+                    dir="ltr"
                     className={`text-base sm:text-lg font-bold font-mono tracking-tight ${
                       isCompound
                         ? 'text-purple-300'
@@ -427,10 +429,10 @@ export const TransactionsTab: React.FC<TransactionsTabProps> = ({
                         : 'text-sky-400'
                     }`}
                   >
-                    {isCompound ? '∑ ' : isDebit ? '-' : isCredit ? '+' : '⇄'}
+                    {isCompound ? '∑ ' : isDebit ? '-' : isCredit ? '+' : '⇄ '}
                     {formatToman(tx.amount)}
-                    <span className="text-[11px] font-normal text-slate-400 mr-1">تومان</span>
                   </div>
+                  <span className="text-[11px] font-normal text-slate-400">تومان</span>
 
                   <div className="mt-2 flex items-center gap-1.5">
                     {/* دکمه ویرایش و اصلاح تراکنش */}

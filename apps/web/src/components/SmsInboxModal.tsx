@@ -161,7 +161,7 @@ export const SmsInboxModal: React.FC<SmsInboxModalProps> = ({
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mt-4 overflow-y-auto flex-1 pr-1">
             {/* ستون راست: لیست پیامک‌های انتظار */}
-            <div className="md:col-span-5 space-y-2 max-h-[60vh] overflow-y-auto">
+            <div className="md:col-span-5 space-y-2 max-h-48 sm:max-h-[60vh] overflow-y-auto">
               {pendingList.map((sms) => {
                 const isSelected = selectedSms?.id === sms.id;
                 return (
@@ -185,7 +185,7 @@ export const SmsInboxModal: React.FC<SmsInboxModalProps> = ({
                     </div>
 
                     <div className="text-xs font-mono font-bold text-amber-400 mb-1">
-                      {formatToman(sms.parsedAmount || 0)} تومان
+                      {formatToman(sms.parsedAmount || 0)}
                     </div>
 
                     <p className="text-[11px] text-slate-400 line-clamp-2 font-mono leading-relaxed">

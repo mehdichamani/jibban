@@ -174,7 +174,7 @@ export const JalaliDatePicker: React.FC<JalaliDatePickerProps> = ({
           <span>ساعت:</span>
         </div>
 
-        <div className="flex items-center gap-1 font-mono text-xs">
+        <div className="flex items-center gap-1 font-mono text-xs" dir="ltr">
           <select
             value={hour}
             onChange={(e) => {

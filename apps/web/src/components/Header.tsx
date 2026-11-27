@@ -28,7 +28,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 sm:gap-2">
               <h1 className="text-base sm:text-xl font-bold tracking-tight text-white">جیب‌بان</h1>
-              <span className="badge badge-bank text-[10px] py-0.5 px-1.5 shrink-0">هسته پارمیس</span>
+              <span className="badge badge-bank text-[10px] py-0.5 px-1.5 shrink-0 hidden sm:inline-flex">هسته پارمیس</span>
             </div>
             <p className="text-[10px] sm:text-xs text-slate-400 hidden sm:block">
               حسابداری دوطرفه پارمیس، پیامک بانکی و دنگ گروهی
@@ -37,14 +37,14 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Action buttons */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {fiscalYears.length > 0 && onSelectFiscalYear && (
-            <div className="inline-flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-200">
+            <div className="inline-flex items-center gap-1 bg-slate-900 border border-slate-700 rounded-xl px-2 py-1.5 text-xs text-slate-200 max-w-[135px] sm:max-w-none">
               <CalendarRange className="w-3.5 h-3.5 text-sky-400 shrink-0" />
               <select
                 value={selectedFiscalYearId || ''}
                 onChange={(e) => onSelectFiscalYear(e.target.value)}
-                className="bg-transparent text-xs font-semibold text-slate-100 focus:outline-none cursor-pointer"
+                className="bg-transparent text-[11px] sm:text-xs font-semibold text-slate-100 focus:outline-none cursor-pointer truncate"
                 title="انتخاب سال مالی"
               >
                 {fiscalYears.map((fy) => (

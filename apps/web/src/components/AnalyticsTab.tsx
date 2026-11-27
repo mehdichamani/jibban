@@ -1,6 +1,7 @@
 import React from 'react';
 import { Transaction, Account } from '../types.js';
 import { PieChart, Award, Landmark } from 'lucide-react';
+import { formatToman as formatTomanCurrency } from '../lib/currency.js';
 
 interface AnalyticsTabProps {
   transactions: Transaction[];
@@ -14,16 +15,19 @@ export const AnalyticsTab: React.FC<AnalyticsTabProps> = ({ transactions, accoun
   const totalDebit = debitTransactions.reduce((acc, t) => acc + t.amount, 0);
   const totalCredit = creditTransactions.reduce((acc, t) => acc + t.amount, 0);
 
-  // تجمیع مخارج بر حسب حساب مقصد (هزینه‌ها/بابت‌ها)
+  // تجمیع مخارج فقط از اسناد هزینه (debit) و اقلام مرکب هزینه
   const destinationSpendingMap = new Map<string, number>();
   for (const tx of transactions) {
     if (tx.isCompound && tx.items) {
       for (const it of tx.items) {
-        if (it.entryType === 'destination' && it.accountId) {
-          destinationSpendingMap.set(it.accountId, (destinationSpendingMap.get(it.accountId) || 0) + it.amount);
+        if ((it.entryType === 'destination' || !it.entryType) && it.accountId) {
+          const acc = accounts.find((a) => a.id === it.accountId);
+          if (!acc || acc.type === 'expense') {
+            destinationSpendingMap.set(it.accountId, (destinationSpendingMap.get(it.accountId) || 0) + it.amount);
+          }
         }
       }
-    } else if (tx.toAccountId) {
+    } else if (tx.type === 'debit' && tx.toAccountId) {
       destinationSpendingMap.set(tx.toAccountId, (destinationSpendingMap.get(tx.toAccountId) || 0) + tx.amount);
     }
   }
@@ -43,16 +47,21 @@ export const AnalyticsTab: React.FC<AnalyticsTabProps> = ({ transactions, accoun
     })
     .sort((a, b) => b.amount - a.amount);
 
-  const formatToman = (amount: number) => {
-    return new Intl.NumberFormat('fa-IR').format(amount);
+  const formatToman = (rialAmount: number) => {
+    return formatTomanCurrency(rialAmount, { showUnit: false });
   };
 
   const topDestination = destinationBreakdown[0];
 
-  // محاسبه کل دارایی‌های مثبت
-  const totalAssets = accounts
-    .filter((a) => a.type === 'bank' || a.type === 'wallet' || a.type === 'savings')
-    .reduce((sum, a) => sum + (a.balance || 0), 0);
+  // فقط حساب‌های برگ دارایی (بانک/صندوق/پس‌انداز) با مانده مثبت
+  const parentIds = new Set(accounts.map((a) => a.parentId).filter(Boolean));
+  const assetAccounts = accounts.filter(
+    (a) =>
+      (a.type === 'bank' || a.type === 'wallet' || a.type === 'savings') &&
+      !parentIds.has(a.id) &&
+      (a.balance || 0) > 0
+  );
+  const totalAssets = assetAccounts.reduce((sum, a) => sum + (a.balance || 0), 0);
 
   return (
     <div className="space-y-6 pb-24 sm:pb-8">
@@ -78,14 +87,14 @@ export const AnalyticsTab: React.FC<AnalyticsTabProps> = ({ transactions, accoun
             <div
               className="bg-emerald-500 h-full transition-all"
               style={{
-                width: `${totalCredit > 0 ? Math.min(100, Math.round((totalCredit / (totalCredit + totalDebit || 1)) * 100)) : 50}%`,
+                width: `${totalCredit + totalDebit > 0 ? Math.round((totalCredit / (totalCredit + totalDebit)) * 100) : 0}%`,
               }}
               title="واریز"
             />
             <div
               className="bg-rose-500 h-full transition-all"
               style={{
-                width: `${totalDebit > 0 ? Math.min(100, Math.round((totalDebit / (totalCredit + totalDebit || 1)) * 100)) : 50}%`,
+                width: `${totalCredit + totalDebit > 0 ? Math.round((totalDebit / (totalCredit + totalDebit)) * 100) : 0}%`,
               }}
               title="برداشت"
             />
@@ -134,9 +143,7 @@ export const AnalyticsTab: React.FC<AnalyticsTabProps> = ({ transactions, accoun
         </h3>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {accounts
-            .filter((a) => a.type === 'bank' || a.type === 'wallet' || a.type === 'savings')
-            .map((acc) => {
+          {assetAccounts.map((acc) => {
               const pct = totalAssets > 0 ? Math.round(((acc.balance || 0) / totalAssets) * 100) : 0;
               return (
                 <div
