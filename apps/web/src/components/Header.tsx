@@ -28,7 +28,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 sm:gap-2">
               <h1 className="text-base sm:text-xl font-bold tracking-tight text-white">جیب‌بان</h1>
-              <span className="badge badge-bank text-[10px] py-0.5 px-1.5 shrink-0 hidden sm:inline-flex">هسته پارمیس</span>
+              <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/15 text-sky-400 border border-sky-500/20 shrink-0">هسته پارمیس</span>
             </div>
             <p className="text-[10px] sm:text-xs text-slate-400 hidden sm:block">
               حسابداری دوطرفه پارمیس، پیامک بانکی و دنگ گروهی
