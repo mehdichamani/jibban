@@ -30,11 +30,17 @@ export function tomanToRial(tomanAmount: number | string): number {
   return Math.round(tomanAmount * 10);
 }
 
+function normalizeFaSeparators(str: string): string {
+  // جایگزینی جداکننده هزارگان عربی (٬) با کامای استاندارد (,) و ممیز (٫) با نقطه (.)
+  // جهت خوانایی بسیار بهتر در فونت وزیرمتن
+  return str.replace(/\u066C/g, ',').replace(/\u066B/g, '.');
+}
+
 /**
  * فرمت‌بندی هوشمند مبلغ به تومان با پشتیبانی از ۱ رقم اعشار
  * مثال:
  * ۱۵۰,۰۰۰ ریال -> «۱۵,۰۰۰ تومان»
- * ۱۵۲,۲۵۵ ریال -> «۱۵,۲۲۵٫۵ تومان»
+ * ۱۵۲,۲۵۵ ریال -> «۱۵,۲۲۵.۵ تومان»
  */
 export function formatToman(rialAmount: number, options: FormatOptions = {}): string {
   const { showUnit = true, unitText = 'تومان', forceDecimals = false } = options;
@@ -43,11 +49,15 @@ export function formatToman(rialAmount: number, options: FormatOptions = {}): st
   }
 
   const toman = rialAmount / 10;
-  const isDecimal = forceDecimals || rialAmount % 10 !== 0;
+  const isNegative = toman < 0;
+  const absToman = Math.abs(toman);
+  const isDecimal = forceDecimals || Math.round(Math.abs(rialAmount)) % 10 !== 0;
 
-  const formattedNumber = isDecimal
-    ? toman.toLocaleString('fa-IR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
-    : Math.round(toman).toLocaleString('fa-IR');
+  const rawNumber = isDecimal
+    ? absToman.toLocaleString('fa-IR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+    : Math.round(absToman).toLocaleString('fa-IR');
+
+  const formattedNumber = `${isNegative ? '\u200E-' : ''}${normalizeFaSeparators(rawNumber)}`;
 
   return showUnit ? `${formattedNumber} ${unitText}` : formattedNumber;
 }
@@ -56,6 +66,9 @@ export function formatToman(rialAmount: number, options: FormatOptions = {}): st
  * فرمت‌بندی مستقیم بر اساس ریال
  */
 export function formatRial(rialAmount: number, showUnit: boolean = true): string {
-  const formatted = Math.round(rialAmount || 0).toLocaleString('fa-IR');
+  const val = Math.round(rialAmount || 0);
+  const isNegative = val < 0;
+  const raw = Math.abs(val).toLocaleString('fa-IR');
+  const formatted = `${isNegative ? '\u200E-' : ''}${normalizeFaSeparators(raw)}`;
   return showUnit ? `${formatted} ریال` : formatted;
 }
