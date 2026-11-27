@@ -1,4 +1,4 @@
-import { Transaction, Group, GroupSummaryData, Category, Account, PendingSms } from '../types.js';
+import { Transaction, Group, GroupSummaryData, Category, Account, PendingSms, FiscalYear } from '../types.js';
 import { parseBankSms } from '@jibban/sms-parser-ir';
 import { PARMIS_ACCOUNT_PARENT_MAP } from './parmisHierarchy.js';
 
@@ -56,6 +56,51 @@ function saveLocalTransactions(txs: Transaction[]): void {
 }
 
 export const api = {
+  // ==================== بخش سال‌های مالی (Fiscal Years) ====================
+
+  async getFiscalYears(): Promise<FiscalYear[]> {
+    try {
+      const res = await fetch(`${API_BASE}/fiscal-years`, {
+        headers: { 'X-Sync-Token': getSyncToken() },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) return json.data;
+      }
+    } catch {
+      //
+    }
+    return [];
+  },
+
+  async activateFiscalYear(id: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${API_BASE}/fiscal-years/${id}/activate`, {
+        method: 'POST',
+        headers: { 'X-Sync-Token': getSyncToken() },
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+
+  async closeFiscalYear(id: string, nextYearName?: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${API_BASE}/fiscal-years/${id}/close`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Sync-Token': getSyncToken(),
+        },
+        body: JSON.stringify({ nextYearName }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+
   // ==================== بخش حساب‌های مالی (Accounts) ====================
 
   /**
@@ -216,6 +261,7 @@ export const api = {
     accountId?: string;
     fromAccountId?: string;
     toAccountId?: string;
+    fiscalYearId?: string;
     limit?: number;
     offset?: number;
   }): Promise<Transaction[]> {
@@ -227,6 +273,7 @@ export const api = {
       if (filter?.accountId) params.append('accountId', filter.accountId);
       if (filter?.fromAccountId) params.append('fromAccountId', filter.fromAccountId);
       if (filter?.toAccountId) params.append('toAccountId', filter.toAccountId);
+      if (filter?.fiscalYearId) params.append('fiscalYearId', filter.fiscalYearId);
       params.append('limit', String(filter?.limit || 25));
       if (filter?.offset) params.append('offset', String(filter.offset));
       url += `?${params.toString()}`;

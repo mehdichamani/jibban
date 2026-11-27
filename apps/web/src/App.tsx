@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Transaction, Account, PendingSms } from './types.js';
+import { Transaction, Account, PendingSms, FiscalYear } from './types.js';
 import { api } from './lib/api.js';
 import { Header } from './components/Header.js';
 import { Navigation, TabType } from './components/Navigation.js';
@@ -23,6 +23,8 @@ export const App: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [pendingSmsList, setPendingSmsList] = useState<PendingSms[]>([]);
+  const [fiscalYears, setFiscalYears] = useState<FiscalYear[]>([]);
+  const [selectedFiscalYearId, setSelectedFiscalYearId] = useState<string | null>(null);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [hasMore, setHasMore] = useState<boolean>(true);
@@ -43,11 +45,23 @@ export const App: React.FC = () => {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  const loadData = async () => {
+  const loadData = async (fyId?: string | null) => {
     setIsLoading(true);
     try {
+      const fyList = await api.getFiscalYears();
+      setFiscalYears(fyList);
+      const activeFy = fyList.find((f) => f.isActive === 1 || f.status === 'open') || fyList[0];
+      const effectiveFyId = fyId !== undefined ? fyId : selectedFiscalYearId || activeFy?.id || null;
+      if (effectiveFyId && effectiveFyId !== selectedFiscalYearId) {
+        setSelectedFiscalYearId(effectiveFyId);
+      }
+
       const [txList, accList, pendingList] = await Promise.all([
-        api.getTransactions({ limit: PAGE_SIZE, offset: 0 }),
+        api.getTransactions({
+          limit: PAGE_SIZE,
+          offset: 0,
+          fiscalYearId: effectiveFyId || undefined,
+        }),
         api.getAccounts(),
         api.getPendingSms(),
       ]);
@@ -60,6 +74,11 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleSelectFiscalYear = async (id: string) => {
+    setSelectedFiscalYearId(id);
+    await loadData(id);
+  };
+
   const handleLoadMore = async () => {
     if (isLoadingMore || !hasMore) return;
     setIsLoadingMore(true);
@@ -67,6 +86,7 @@ export const App: React.FC = () => {
       const nextBatch = await api.getTransactions({
         limit: PAGE_SIZE,
         offset: transactions.length,
+        fiscalYearId: selectedFiscalYearId || undefined,
       });
       if (nextBatch.length > 0) {
         setTransactions((prev) => {
@@ -311,6 +331,9 @@ export const App: React.FC = () => {
       <Header
         onOpenInbox={() => setIsInboxOpen(true)}
         pendingCount={pendingSmsList.length}
+        fiscalYears={fiscalYears}
+        selectedFiscalYearId={selectedFiscalYearId}
+        onSelectFiscalYear={handleSelectFiscalYear}
       />
 
       {/* محتوای اصلی */}

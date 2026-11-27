@@ -1,5 +1,13 @@
 import { Hono } from 'hono';
 import { Bindings, Variables, Transaction, TransactionItem } from '../types.js';
+import {
+  getActiveFiscalYear,
+  getCurrentShamsiDateTime,
+  resolveAccountPath,
+  applyActivityBalances,
+  reverseActivityRowBalances,
+  pickLeafAccountId,
+} from '../lib/parmis-core.js';
 
 export const transactionsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
@@ -13,7 +21,6 @@ transactionsRouter.get('/', async (c) => {
   const limit = Math.min(1000, parseInt(c.req.query('limit') || '500', 10));
   const offset = parseInt(c.req.query('offset') || '0', 10);
 
-  // کوئری جامع استخراج اسناد از Activity به همراه نام حساب‌ها
   let query = `
     SELECT 
       act.Act_id as id,
@@ -88,10 +95,9 @@ transactionsRouter.get('/', async (c) => {
   const { results } = await c.env.DB.prepare(query).bind(...params).all<any>();
   const rawList = results || [];
 
-  // پیدا کردن سندهای مرکب برای الحاق اقلام (multiType = 2)
   const compoundMultiIds = rawList
-    .filter(row => row.multiId > 0 && row.multiType === 1)
-    .map(row => Number(row.multiId));
+    .filter((row) => row.multiId > 0 && row.multiType === 1)
+    .map((row) => Number(row.multiId));
 
   const itemsByMultiId = new Map<number, TransactionItem[]>();
 
@@ -106,6 +112,7 @@ transactionsRouter.get('/', async (c) => {
         CASE 
           WHEN act.Act_accPay_id > 0 THEN act.Act_accPay_id
           WHEN act.Act_pay_Subacc_id > 0 THEN act.Act_pay_Subacc_id
+          WHEN act.Act_pay_Root_id > 0 THEN act.Act_pay_Root_id
           ELSE NULL
         END as toAccountId,
         acc.Ac_title as toAccountName
@@ -114,6 +121,7 @@ transactionsRouter.get('/', async (c) => {
         CASE 
           WHEN act.Act_accPay_id > 0 THEN act.Act_accPay_id
           WHEN act.Act_pay_Subacc_id > 0 THEN act.Act_pay_Subacc_id
+          WHEN act.Act_pay_Root_id > 0 THEN act.Act_pay_Root_id
           ELSE NULL
         END
       )
@@ -137,36 +145,40 @@ transactionsRouter.get('/', async (c) => {
     });
   }
 
-  // مپینگ نهایی به مدل Transaction فرانت‌اند
   const transactions: Transaction[] = rawList.map((row: any) => {
     const isCompound = row.inferredType === 'compound' || (row.multiId > 0 && row.multiType === 1);
-    const items = isCompound ? (itemsByMultiId.get(Number(row.multiId)) || []) : undefined;
+    const items = isCompound ? itemsByMultiId.get(Number(row.multiId)) || [] : undefined;
 
     return {
       id: String(row.id),
       userId: 'user_default',
-      fiscalYearId: row.fiscalYearId ? String(row.fiscalYearId) : '3',
+      fiscalYearId: row.fiscalYearId ? String(row.fiscalYearId) : '1',
       type: isCompound ? 'compound' : row.inferredType,
       amount: Math.round(Number(row.amount || 0)),
       fromAccountId: row.fromAccountId ? String(row.fromAccountId) : null,
       fromAccountName: row.fromAccountName || (row.inferredType === 'credit' ? 'درآمد' : undefined),
       toAccountId: row.toAccountId ? String(row.toAccountId) : null,
       toAccountName: row.toAccountName || (isCompound ? 'چند مقصدی' : undefined),
-      categoryName: row.inferredType === 'debit' ? row.toAccountName : (row.inferredType === 'credit' ? row.toAccountName : undefined),
+      categoryName:
+        row.inferredType === 'debit'
+          ? row.toAccountName
+          : row.inferredType === 'credit'
+          ? row.fromAccountName
+          : undefined,
       description: row.description || '',
       shamsiDate: row.shamsiDate || '',
       transactionDate: row.shamsiDate ? row.shamsiDate.replace(/\//g, '-') : '',
       time: row.time || '',
       isCompound,
       items,
-      createdAt: `${row.shamsiDate || '1405-01-01'}T${row.time || '12:00'}:00.000Z`,
+      createdAt: `${row.shamsiDate || '1405/01/01'}T${row.time || '12:00'}:00.000Z`,
     };
   });
 
   if (typeFilter) {
     return c.json({
       success: true,
-      data: transactions.filter(t => t.type === typeFilter),
+      data: transactions.filter((t) => t.type === typeFilter),
     });
   }
 
@@ -174,22 +186,24 @@ transactionsRouter.get('/', async (c) => {
 });
 
 /**
- * ثبت تراکنش جدید (ساده یا چند حسابی مرکب) در جدول Activity
+ * ثبت تراکنش جدید (ساده یا چند حسابی مرکب) با رعایت کامل سلسله‌مراتب ۳ سطحی و سال مالی فعال پارمیس
  */
 transactionsRouter.post('/', async (c) => {
   const body = await c.req.json<{
     type?: 'debit' | 'credit' | 'transfer' | 'compound';
     amount: number;
-    fromAccountId?: string | number;
-    toAccountId?: string | number;
+    fromAccountId?: string | number | null;
+    toAccountId?: string | number | null;
+    fiscalYearId?: string | number;
     description?: string;
     shamsiDate?: string;
+    transactionDate?: string;
     time?: string;
     isCompound?: boolean;
     items?: Array<{
-      accountId: string | number;
+      accountId?: string | number | null;
       amount: number;
-      description?: string;
+      description?: string | null;
     }>;
   }>();
 
@@ -197,151 +211,222 @@ transactionsRouter.post('/', async (c) => {
     return c.json({ success: false, error: 'مبلغ تراکنش باید بزرگتر از صفر باشد' }, 400);
   }
 
-  // تاریخ و ساعت شمسی پیش‌فرض
-  const now = new Date();
-  const time = body.time || `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  const shamsiDate = body.shamsiDate || '1405/08/15';
+  const activeFy = await getActiveFiscalYear(c.env.DB);
+  const fiscalId = body.fiscalYearId ? Number(body.fiscalYearId) : activeFy.id;
+  const nowShamsi = getCurrentShamsiDateTime(body.transactionDate);
+  const shamsiDate = (body.shamsiDate || nowShamsi.shamsiDate).replace(/-/g, '/');
+  const time = body.time || nowShamsi.time;
 
   const maxActRow = await c.env.DB.prepare('SELECT MAX(Act_id) as maxId FROM Activity').first<{ maxId: number }>();
-  let nextActId = (maxActRow?.maxId || 5550) + 1;
+  let nextActId = (maxActRow?.maxId || 0) + 1;
 
   const isCompound = body.type === 'compound' || body.isCompound || (body.items && body.items.length > 1);
 
   if (isCompound && body.items && body.items.length > 0) {
-    // سند چند مقصدی / مرکب
     const maxMultiRow = await c.env.DB.prepare('SELECT MAX(MultiId) as maxMId FROM MultiActivity').first<{ maxMId: number }>();
-    const nextMultiId = (maxMultiRow?.maxMId || 440) + 1;
+    const nextMultiId = (maxMultiRow?.maxMId || 0) + 1;
 
-    // ۱. ثبت در MultiActivity
     await c.env.DB.prepare(
       'INSERT INTO MultiActivity (MultiId, Date, Time, Info, Serial, Type) VALUES (?, ?, ?, ?, ?, 1)'
     ).bind(nextMultiId, shamsiDate, time, body.description || '', nextActId).run();
 
-    // ۲. ثبت رکورد سربرگ در Activity (نوع ۱)
-    const fromAccId = Number(body.fromAccountId) || 173;
+    const fromAccId = body.fromAccountId ? Number(body.fromAccountId) : null;
+    const fromPath = await resolveAccountPath(c.env.DB, fromAccId, 4);
+    const headerActId = nextActId;
+
     await c.env.DB.prepare(
       `INSERT INTO Activity (
         Act_id, Act_amount, Act_date, Act_time, Act_info,
-        Act_rec_Subacc_id, Act_rec_Root_id, Act_pay_Root_id, Act_accPay_id,
+        Act_rec_Root_id, Act_rec_Subacc_id, Act_accRecive_id, RecivePath,
+        Act_pay_Root_id, Act_pay_Subacc_id, Act_accPay_id, PayPath,
         Act_multiId, Act_multiType, Act_Fiscal_id, Act_iscash, Act_set
-      ) VALUES (?, ?, ?, ?, ?, ?, 4, -1, -1, ?, 1, 3, 1, 1)`
-    ).bind(
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, -1, -1, -1, '', ?, 1, ?, 1, 1)`
+    )
+      .bind(
+        headerActId,
+        body.amount,
+        shamsiDate,
+        time,
+        body.description || '',
+        fromPath.rootId,
+        fromPath.subaccId,
+        fromPath.leafId,
+        fromPath.path,
+        nextMultiId,
+        fiscalId
+      )
+      .run();
+
+    await applyActivityBalances(c.env.DB, fromPath.accountId, null, body.amount);
+
+    for (const item of body.items) {
+      nextActId++;
+      const itemAccId = item.accountId ? Number(item.accountId) : null;
+      const itemPath = await resolveAccountPath(c.env.DB, itemAccId, 1);
+
+      await c.env.DB.prepare(
+        `INSERT INTO Activity (
+          Act_id, Act_amount, Act_date, Act_time, Act_info,
+          Act_rec_Root_id, Act_rec_Subacc_id, Act_accRecive_id, RecivePath,
+          Act_pay_Root_id, Act_pay_Subacc_id, Act_accPay_id, PayPath,
+          Act_multiId, Act_multiType, Act_Fiscal_id, Act_iscash, Act_set
+        ) VALUES (?, ?, ?, ?, ?, -1, -1, -1, '', ?, ?, ?, ?, ?, 2, ?, 1, 1)`
+      )
+        .bind(
+          nextActId,
+          item.amount,
+          shamsiDate,
+          time,
+          item.description || body.description || '',
+          itemPath.rootId,
+          itemPath.subaccId,
+          itemPath.leafId,
+          itemPath.path,
+          nextMultiId,
+          fiscalId
+        )
+        .run();
+
+      await applyActivityBalances(c.env.DB, null, itemPath.accountId, item.amount);
+    }
+
+    return c.json(
+      {
+        success: true,
+        data: {
+          id: String(headerActId),
+          amount: body.amount,
+          type: 'compound',
+          fiscalYearId: String(fiscalId),
+          multiId: nextMultiId,
+          shamsiDate,
+          time,
+        },
+      },
+      201
+    );
+  }
+
+  // سند ساده: قرارداد پارمیس همیشه Rec = مبدا (منبع پول) ، Pay = مقصد (مصرف/واریز)
+  const txType = body.type || 'debit';
+  const fromAccId = body.fromAccountId ? Number(body.fromAccountId) : null;
+  const toAccId = body.toAccountId ? Number(body.toAccountId) : null;
+
+  const fallbackFromRoot = txType === 'credit' ? 2 : 4;
+  const fallbackToRoot = txType === 'debit' ? 1 : 4;
+
+  const recPath = await resolveAccountPath(c.env.DB, fromAccId, fallbackFromRoot);
+  const payPath = await resolveAccountPath(c.env.DB, toAccId, fallbackToRoot);
+
+  await c.env.DB.prepare(
+    `INSERT INTO Activity (
+      Act_id, Act_amount, Act_date, Act_time, Act_info,
+      Act_rec_Root_id, Act_rec_Subacc_id, Act_accRecive_id, RecivePath,
+      Act_pay_Root_id, Act_pay_Subacc_id, Act_accPay_id, PayPath,
+      Act_multiId, Act_multiType, Act_Fiscal_id, Act_iscash, Act_set
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, 1, 1)`
+  )
+    .bind(
       nextActId,
       body.amount,
       shamsiDate,
       time,
       body.description || '',
-      fromAccId,
-      nextMultiId
-    ).run();
+      recPath.rootId,
+      recPath.subaccId,
+      recPath.leafId,
+      recPath.path,
+      payPath.rootId,
+      payPath.subaccId,
+      payPath.leafId,
+      payPath.path,
+      fiscalId
+    )
+    .run();
 
-    // به‌روزرسانی مانده حساب مبدا
-    await c.env.DB.prepare(
-      'UPDATE accounts SET Ac_balance = Ac_balance - ? WHERE Ac_id = ?'
-    ).bind(body.amount, fromAccId).run();
+  await applyActivityBalances(c.env.DB, recPath.accountId, payPath.accountId, body.amount);
 
-    // ۳. ثبت اقلام ریزهزینه (نوع ۲)
-    for (const item of body.items) {
-      nextActId++;
-      const itemAccId = Number(item.accountId);
-      await c.env.DB.prepare(
-        `INSERT INTO Activity (
-          Act_id, Act_amount, Act_date, Act_time, Act_info,
-          Act_accPay_id, Act_pay_Root_id, Act_rec_Root_id,
-          Act_multiId, Act_multiType, Act_Fiscal_id, Act_iscash, Act_set
-        ) VALUES (?, ?, ?, ?, ?, ?, 1, -1, ?, 2, 3, 1, 1)`
-      ).bind(
-        nextActId,
-        item.amount,
-        shamsiDate,
-        time,
-        item.description || body.description || '',
-        itemAccId,
-        nextMultiId
-      ).run();
-
-      // افزایش هزینه مربوطه
-      await c.env.DB.prepare(
-        'UPDATE accounts SET Ac_balance = Ac_balance + ? WHERE Ac_id = ?'
-      ).bind(item.amount, itemAccId).run();
-    }
-
-    return c.json({
+  return c.json(
+    {
       success: true,
       data: {
-        id: String(nextActId - body.items.length),
+        id: String(nextActId),
         amount: body.amount,
-        type: 'compound',
-        multiId: nextMultiId,
+        type: txType,
+        fiscalYearId: String(fiscalId),
+        shamsiDate,
+        time,
       },
-    }, 201);
-  }
+    },
+    201
+  );
+});
 
-  // سند ساده (هزینه، درآمد، انتقال)
-  const txType = body.type || 'debit';
-  let payRoot = -1;
-  let recRoot = -1;
-  let payAcc = -1;
-  let recAcc = -1;
+/**
+ * ویرایش و اصلاح سند مالی با بازمحاسبه دقیق مانده حساب‌ها
+ */
+transactionsRouter.patch('/:id', async (c) => {
+  const id = Number(c.req.param('id'));
+  if (isNaN(id)) return c.json({ success: false, error: 'شناسه سند نامعتبر است' }, 400);
 
-  if (txType === 'debit') {
-    // برداشت از بانک/صندوق به حساب هزینه
-    recRoot = 4;
-    recAcc = Number(body.fromAccountId) || 173;
-    payRoot = 1;
-    payAcc = Number(body.toAccountId) || 51;
-  } else if (txType === 'credit') {
-    // درآمد به حساب بانک/صندوق
-    recRoot = 4;
-    recAcc = Number(body.toAccountId) || 173;
-    payRoot = 2;
-    payAcc = Number(body.fromAccountId) || 36;
-  } else {
-    // انتقال بین بانکی
-    recRoot = 4;
-    recAcc = Number(body.fromAccountId) || 173;
-    payRoot = 4;
-    payAcc = Number(body.toAccountId) || 174;
-  }
+  const existing = await c.env.DB.prepare('SELECT * FROM Activity WHERE Act_id = ?').bind(id).first<any>();
+  if (!existing) return c.json({ success: false, error: 'سند یافت نشد' }, 404);
+
+  const body = await c.req.json<{
+    amount?: number;
+    type?: 'debit' | 'credit' | 'transfer' | 'compound';
+    fromAccountId?: string | number | null;
+    toAccountId?: string | number | null;
+    description?: string;
+    shamsiDate?: string;
+    transactionDate?: string;
+    time?: string;
+  }>();
+
+  // ۱. برگرداندن اثر مالی سند قبلی
+  await reverseActivityRowBalances(c.env.DB, existing);
+
+  const newAmount = body.amount !== undefined ? Number(body.amount) : Number(existing.Act_amount || 0);
+  const newDesc = body.description !== undefined ? body.description : existing.Act_info || '';
+  const newDate = (body.shamsiDate || body.transactionDate || existing.Act_date || '').replace(/-/g, '/');
+  const newTime = body.time || existing.Act_time || '12:00';
+
+  const oldFromId = pickLeafAccountId(existing.Act_accRecive_id, existing.Act_rec_Subacc_id, existing.Act_rec_Root_id);
+  const oldToId = pickLeafAccountId(existing.Act_accPay_id, existing.Act_pay_Subacc_id, existing.Act_pay_Root_id);
+
+  const newFromId = body.fromAccountId !== undefined ? (body.fromAccountId ? Number(body.fromAccountId) : null) : oldFromId;
+  const newToId = body.toAccountId !== undefined ? (body.toAccountId ? Number(body.toAccountId) : null) : oldToId;
+
+  const recPath = await resolveAccountPath(c.env.DB, newFromId, existing.Act_rec_Root_id ?? -1);
+  const payPath = await resolveAccountPath(c.env.DB, newToId, existing.Act_pay_Root_id ?? -1);
 
   await c.env.DB.prepare(
-    `INSERT INTO Activity (
-      Act_id, Act_amount, Act_date, Act_time, Act_info,
-      Act_rec_Subacc_id, Act_rec_Root_id, Act_accPay_id, Act_pay_Root_id,
-      Act_multiId, Act_multiType, Act_Fiscal_id, Act_iscash, Act_set
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 3, 1, 1)`
-  ).bind(
-    nextActId,
-    body.amount,
-    shamsiDate,
-    time,
-    body.description || '',
-    recAcc,
-    recRoot,
-    payAcc,
-    payRoot
-  ).run();
+    `UPDATE Activity
+     SET Act_amount = ?, Act_info = ?, Act_date = ?, Act_time = ?,
+         Act_rec_Root_id = ?, Act_rec_Subacc_id = ?, Act_accRecive_id = ?, RecivePath = ?,
+         Act_pay_Root_id = ?, Act_pay_Subacc_id = ?, Act_accPay_id = ?, PayPath = ?
+     WHERE Act_id = ?`
+  )
+    .bind(
+      newAmount,
+      newDesc,
+      newDate,
+      newTime,
+      recPath.rootId,
+      recPath.subaccId,
+      recPath.leafId,
+      recPath.path,
+      payPath.rootId,
+      payPath.subaccId,
+      payPath.leafId,
+      payPath.path,
+      id
+    )
+    .run();
 
-  // اعمال اثر بر مانده حساب‌ها
-  if (txType === 'debit') {
-    await c.env.DB.prepare('UPDATE accounts SET Ac_balance = Ac_balance - ? WHERE Ac_id = ?').bind(body.amount, recAcc).run();
-  } else if (txType === 'credit') {
-    await c.env.DB.prepare('UPDATE accounts SET Ac_balance = Ac_balance + ? WHERE Ac_id = ?').bind(body.amount, recAcc).run();
-  } else if (txType === 'transfer') {
-    await c.env.DB.prepare('UPDATE accounts SET Ac_balance = Ac_balance - ? WHERE Ac_id = ?').bind(body.amount, recAcc).run();
-    await c.env.DB.prepare('UPDATE accounts SET Ac_balance = Ac_balance + ? WHERE Ac_id = ?').bind(body.amount, payAcc).run();
-  }
+  await applyActivityBalances(c.env.DB, recPath.accountId, payPath.accountId, newAmount);
 
-  return c.json({
-    success: true,
-    data: {
-      id: String(nextActId),
-      amount: body.amount,
-      type: txType,
-      shamsiDate,
-      time,
-    },
-  }, 201);
+  return c.json({ success: true, message: 'سند با موفقیت اصلاح و مانده حساب‌ها بروزرسانی شد' });
 });
 
 /**
@@ -354,10 +439,20 @@ transactionsRouter.get('/:id', async (c) => {
   const row = await c.env.DB.prepare(
     `SELECT act.*, fromAcc.Ac_title as fromTitle, toAcc.Ac_title as toTitle
      FROM Activity act
-     LEFT JOIN accounts fromAcc ON fromAcc.Ac_id = act.Act_rec_Subacc_id
-     LEFT JOIN accounts toAcc ON toAcc.Ac_id = act.Act_accPay_id
+     LEFT JOIN accounts fromAcc ON fromAcc.Ac_id = (
+       CASE WHEN act.Act_accRecive_id > 0 THEN act.Act_accRecive_id
+            WHEN act.Act_rec_Subacc_id > 0 THEN act.Act_rec_Subacc_id
+            ELSE act.Act_rec_Root_id END
+     )
+     LEFT JOIN accounts toAcc ON toAcc.Ac_id = (
+       CASE WHEN act.Act_accPay_id > 0 THEN act.Act_accPay_id
+            WHEN act.Act_pay_Subacc_id > 0 THEN act.Act_pay_Subacc_id
+            ELSE act.Act_pay_Root_id END
+     )
      WHERE act.Act_id = ?`
-  ).bind(id).first<any>();
+  )
+    .bind(id)
+    .first<any>();
 
   if (!row) {
     return c.json({ success: false, error: 'سند یافت نشد' }, 404);
@@ -367,7 +462,7 @@ transactionsRouter.get('/:id', async (c) => {
 });
 
 /**
- * حذف یک سند
+ * حذف یک سند همراه با برگرداندن مانده حساب‌ها و آزادسازی پیامک متصل
  */
 transactionsRouter.delete('/:id', async (c) => {
   const id = Number(c.req.param('id'));
@@ -376,13 +471,21 @@ transactionsRouter.delete('/:id', async (c) => {
   const act = await c.env.DB.prepare('SELECT * FROM Activity WHERE Act_id = ?').bind(id).first<any>();
   if (!act) return c.json({ success: false, error: 'سند پیدا نشد' }, 404);
 
-  // اگر مرکب است، همه اقلام حذف شوند
   if (act.Act_multiId > 0) {
+    const { results: multiRows } = await c.env.DB.prepare('SELECT * FROM Activity WHERE Act_multiId = ?')
+      .bind(act.Act_multiId)
+      .all<any>();
+    for (const row of multiRows || []) {
+      await reverseActivityRowBalances(c.env.DB, row);
+    }
     await c.env.DB.prepare('DELETE FROM Activity WHERE Act_multiId = ?').bind(act.Act_multiId).run();
     await c.env.DB.prepare('DELETE FROM MultiActivity WHERE MultiId = ?').bind(act.Act_multiId).run();
   } else {
+    await reverseActivityRowBalances(c.env.DB, act);
     await c.env.DB.prepare('DELETE FROM Activity WHERE Act_id = ?').bind(id).run();
   }
+
+  await c.env.DB.prepare('UPDATE smsTable SET TransactionId = 0 WHERE TransactionId = ?').bind(id).run();
 
   return c.json({ success: true, message: 'سند با موفقیت حذف شد' });
 });

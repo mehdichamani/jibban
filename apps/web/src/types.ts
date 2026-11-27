@@ -84,6 +84,17 @@ export interface Category {
   isIncome?: boolean;
 }
 
+export interface FiscalYear {
+  id: string;
+  name: string;
+  beginDate: string;
+  endDate: string;
+  status: 'open' | 'closed';
+  isActive: number;
+  txCount?: number;
+  remainedCount?: number;
+}
+
 export interface PendingSms {
   id: string;
   smsHash: string;

@@ -1,67 +1,8 @@
-import { Account, Category } from '../types.js';
-
-export const DEFAULT_CATEGORIES: Array<{
-  id: string;
-  name: string;
-  type: 'expense' | 'income';
-  parent_id: string | null;
-  icon: string;
-  color: string;
-}> = [
-  // دسته‌های اصلی هزینه
-  { id: 'cat_food', name: 'خوراک و مواد غذایی', type: 'expense', parent_id: null, icon: 'utensils', color: '#f59e0b' },
-  { id: 'cat_housing', name: 'مسکن، اجاره و قبوض', type: 'expense', parent_id: null, icon: 'home', color: '#8b5cf6' },
-  { id: 'cat_transport', name: 'حمل و نقل و خودرو', type: 'expense', parent_id: null, icon: 'car', color: '#3b82f6' },
-  { id: 'cat_health', name: 'پزشکی، دارو و سلامت', type: 'expense', parent_id: null, icon: 'heart-pulse', color: '#ef4444' },
-  { id: 'cat_shopping', name: 'خرید و پوشاک', type: 'expense', parent_id: null, icon: 'shopping-bag', color: '#ec4899' },
-  { id: 'cat_finance', name: 'تسهیلات و وام', type: 'expense', parent_id: null, icon: 'credit-card', color: '#f97316' },
-  { id: 'cat_other_exp', name: 'سایر هزینه‌ها', type: 'expense', parent_id: null, icon: 'archive', color: '#64748b' },
-
-  // زیرمجموعه‌های هزینه
-  { id: 'cat_supermarket', name: 'سوپرمارکت و میوه', type: 'expense', parent_id: 'cat_food', icon: 'shopping-cart', color: '#f59e0b' },
-  { id: 'cat_restaurant', name: 'رستوران و کافه', type: 'expense', parent_id: 'cat_food', icon: 'coffee', color: '#f59e0b' },
-  { id: 'cat_rent', name: 'اجاره‌بها', type: 'expense', parent_id: 'cat_housing', icon: 'key', color: '#8b5cf6' },
-  { id: 'cat_bills', name: 'قبوض خدماتی', type: 'expense', parent_id: 'cat_housing', icon: 'zap', color: '#8b5cf6' },
-  { id: 'cat_fuel', name: 'بنزین و سوخت', type: 'expense', parent_id: 'cat_transport', icon: 'fuel', color: '#3b82f6' },
-  { id: 'cat_taxi', name: 'تاکسی و اسنپ', type: 'expense', parent_id: 'cat_transport', icon: 'navigation', color: '#3b82f6' },
-
-  // دسته‌های درآمد
-  { id: 'cat_salary', name: 'حقوق و دستمزد', type: 'income', parent_id: null, icon: 'briefcase', color: '#22c55e' },
-  { id: 'cat_investment', name: 'سرمایه‌گذاری و سود', type: 'income', parent_id: null, icon: 'trending-up', color: '#10b981' },
-  { id: 'cat_other_inc', name: 'سایر درآمدها', type: 'income', parent_id: null, icon: 'plus-circle', color: '#84cc16' },
-];
-
-export const DEFAULT_ACCOUNTS = [
-  {
-    id: 'acc_cash_wallet',
-    name: 'کیف پول نقدی',
-    type: 'wallet' as const,
-    bank_name: 'نقدی',
-    account_number: 'CASH',
-    card_number: '',
-    sheba: '',
-    balance: 0,
-    initial_balance: 0,
-    color: '#10b981',
-    icon: 'wallet',
-  },
-  {
-    id: 'acc_default_bank',
-    name: 'حساب بانکی اصلی',
-    type: 'bank' as const,
-    bank_name: 'بانک',
-    account_number: '',
-    card_number: '',
-    sheba: '',
-    balance: 0,
-    initial_balance: 0,
-    color: '#0284c7',
-    icon: 'landmark',
-  },
-];
+import { PARMIS_SEED_ACCOUNTS, PARMIS_SEED_BANKS } from './parmis-seed-data.js';
+import { getCurrentShamsiDateTime } from '../lib/parmis-core.js';
 
 /**
- * مقداردهی اولیه پایگاه داده برای کارکرد روان با دیتابیس سفید (Cold Start)
+ * مقداردهی اولیه پایگاه داده بومی پارمیس برای کارکرد روان با دیتابیس سفید (Cold Start)
  */
 export async function ensureInitialSeed(db: D1Database): Promise<void> {
   const defaultUserId = 'user_default';
@@ -80,51 +21,73 @@ export async function ensureInitialSeed(db: D1Database): Promise<void> {
       .run();
   }
 
-  // ۲. بررسی دسته‌بندی‌ها
-  const catCountResult = await db
-    .prepare('SELECT COUNT(*) as count FROM categories WHERE user_id = ? OR user_id IS NULL')
-    .bind(defaultUserId)
+  // ۲. بررسی و سید سال مالی فعال بر اساس سال شمسی جاری
+  const fiscalCount = await db
+    .prepare('SELECT COUNT(*) as count FROM FiscalYear')
     .first<{ count: number }>();
 
-  if (!catCountResult || catCountResult.count === 0) {
-    const catStatements = DEFAULT_CATEGORIES.map((cat) =>
-      db
-        .prepare('INSERT OR IGNORE INTO categories (id, user_id, parent_id, name, type, icon, color) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .bind(cat.id, defaultUserId, cat.parent_id, cat.name, cat.type, cat.icon, cat.color)
-    );
-    await db.batch(catStatements);
+  if (!fiscalCount || fiscalCount.count === 0) {
+    const { year } = getCurrentShamsiDateTime();
+    await db
+      .prepare(
+        `INSERT OR IGNORE INTO FiscalYear (
+          fiscal_id, fiscal_name, fiscal_beginDate, fiscal_endDate, fiscal_status
+        ) VALUES (1, ?, ?, ?, 1)`
+      )
+      .bind(String(year), `${year}/01/01`, `${year}/12/30`)
+      .run();
   }
 
-  // ۳. بررسی حساب‌ها
-  const accCountResult = await db
-    .prepare('SELECT COUNT(*) as count FROM accounts WHERE user_id = ?')
-    .bind(defaultUserId)
+  // ۳. بررسی و سید بانک‌های ایران (۵۱ بانک پارمیس)
+  const bankCount = await db
+    .prepare('SELECT COUNT(*) as count FROM Bank')
     .first<{ count: number }>();
 
-  if (!accCountResult || accCountResult.count === 0) {
-    const accStatements = DEFAULT_ACCOUNTS.map((acc) =>
-      db
-        .prepare(
-          `INSERT OR IGNORE INTO accounts (
-            id, user_id, name, type, bank_name, account_number, card_number, sheba,
-            balance, initial_balance, color, icon
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  if (!bankCount || bankCount.count === 0) {
+    const CHUNK = 25;
+    for (let i = 0; i < PARMIS_SEED_BANKS.length; i += CHUNK) {
+      const slice = PARMIS_SEED_BANKS.slice(i, i + CHUNK);
+      await db.batch(
+        slice.map((b) =>
+          db
+            .prepare('INSERT OR IGNORE INTO Bank (id, Bank_name, systematic, imageName) VALUES (?, ?, ?, ?)')
+            .bind(b.id, b.Bank_name, b.systematic, b.imageName)
         )
-        .bind(
-          acc.id,
-          defaultUserId,
-          acc.name,
-          acc.type,
-          acc.bank_name,
-          acc.account_number,
-          acc.card_number,
-          acc.sheba,
-          acc.balance,
-          acc.initial_balance,
-          acc.color,
-          acc.icon
+      );
+    }
+  }
+
+  // ۴. بررسی و سید درخت حساب‌های پایه پارمیس (۱۶۵ حساب کل و معین)
+  const accCount = await db
+    .prepare('SELECT COUNT(*) as count FROM accounts')
+    .first<{ count: number }>();
+
+  if (!accCount || accCount.count === 0) {
+    const CHUNK = 25;
+    for (let i = 0; i < PARMIS_SEED_ACCOUNTS.length; i += CHUNK) {
+      const slice = PARMIS_SEED_ACCOUNTS.slice(i, i + CHUNK);
+      await db.batch(
+        slice.map((a) =>
+          db
+            .prepare(
+              `INSERT OR IGNORE INTO accounts (
+                Ac_id, Ac_parent_id, Ac_title, Ac_balance, Ac_isLeaf, Ac_isSystematic,
+                Ac_payable, Ac_recivable, Ac_enable, ac_icon
+              ) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`
+            )
+            .bind(
+              a.Ac_id,
+              a.Ac_parent_id,
+              a.Ac_title,
+              a.Ac_isLeaf ?? 1,
+              a.Ac_isSystematic ?? 0,
+              a.Ac_payable ?? 1,
+              a.Ac_recivable ?? 1,
+              a.Ac_enable ?? 1,
+              a.ac_icon ?? 'defaultpic'
+            )
         )
-    );
-    await db.batch(accStatements);
+      );
+    }
   }
 }

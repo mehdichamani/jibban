@@ -1,14 +1,21 @@
 import React from 'react';
-import { Wallet, Inbox } from 'lucide-react';
+import { Wallet, Inbox, CalendarRange } from 'lucide-react';
+import { FiscalYear } from '../types.js';
 
 interface HeaderProps {
   onOpenInbox: () => void;
   pendingCount?: number;
+  fiscalYears?: FiscalYear[];
+  selectedFiscalYearId?: string | null;
+  onSelectFiscalYear?: (id: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onOpenInbox,
   pendingCount = 0,
+  fiscalYears = [],
+  selectedFiscalYearId,
+  onSelectFiscalYear,
 }) => {
   return (
     <header className="sticky top-0 z-40 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md px-3.5 py-2.5 sm:px-6 sm:py-3 pt-[max(env(safe-area-inset-top),0.75rem)]">
@@ -21,16 +28,34 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 sm:gap-2">
               <h1 className="text-base sm:text-xl font-bold tracking-tight text-white">جیب‌بان</h1>
-              <span className="badge badge-bank text-[10px] py-0.5 px-1.5 shrink-0">ابری ۳.۰</span>
+              <span className="badge badge-bank text-[10px] py-0.5 px-1.5 shrink-0">هسته پارمیس</span>
             </div>
             <p className="text-[10px] sm:text-xs text-slate-400 hidden sm:block">
-              حسابداری شخصی پارمیس و دنگ گروهی
+              حسابداری دوطرفه پارمیس، پیامک بانکی و دنگ گروهی
             </p>
           </div>
         </div>
 
         {/* Action buttons */}
         <div className="flex items-center gap-2 shrink-0">
+          {fiscalYears.length > 0 && onSelectFiscalYear && (
+            <div className="inline-flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-200">
+              <CalendarRange className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+              <select
+                value={selectedFiscalYearId || ''}
+                onChange={(e) => onSelectFiscalYear(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-slate-100 focus:outline-none cursor-pointer"
+                title="انتخاب سال مالی"
+              >
+                {fiscalYears.map((fy) => (
+                  <option key={fy.id} value={fy.id} className="bg-slate-900 text-slate-100">
+                    سال {fy.name} {fy.status === 'open' ? '(فعال)' : '(بسته)'}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* دکمه صندوق ورودی پیامک‌ها با بج شمارنده */}
           <button
             onClick={onOpenInbox}
